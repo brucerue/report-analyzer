@@ -54,12 +54,27 @@ dc.periodic_reports = lambda *a, **k: ROWS
 dc.report_text = lambda s, c, key, rno, **k: fake_report(
     rate="47.2" if rno.startswith("2026") else "60.1",
     new_line="당사는 로봇과 우주항공용 배터리로 사업 영역을 확대하고 있습니다." if rno.startswith("2026") else "당사는 ESS 사업을 축소하고 있습니다.")
-an.call_gemini = lambda *a, **k: (
+os.environ.setdefault("STYLE_DIR", os.path.join(HERE, "fake_style"))
+FRAME = ("제목: 가나전지, 로봇용 배터리 확대…매출 12.5% 증가\n\n가나전지가 배터리 사업의 무게중심을 옮기고 있다. 전기차 대신 로봇·우주항공용 배터리로 사업 영역을 넓히면서다.\n\n"
+         "가나전지가 OO일 공시한 2025년 사업보고서에 따르면 매출은 9조원으로 전년보다 12.5% 늘었다. 【확인 필요: 매출이 늘어난 원인】\n\n"
+         "공장 가동률은 47.2%로 전년(60.1%)보다 12.9%p 하락했다.")
+
+
+def _fake_ai(session, key, model, prompt, system, fallback=None):
+    if "규칙에 어긋난 문장만" in prompt:
+        return FRAME + "\n\n[고친 곳]\n- 매출은 9조원을 기록해 → 매출은 9조원으로"
+    if "기사 유형:" in prompt:
+        return FRAME.replace("9조원으로", "9조원을 기록해")
+    return _AI_ANSWER
+
+
+_AI_ANSWER = (
     "**한 줄 요약**: 가동률이 47.2%로 나타났다.\n\n**핵심 포인트**\n"
     "- 2025년 가동률은 47.2%다 [II-3. 원재료 및 생산설비 · 줄 16]\n"
     "- 회사는 주요 원재료인 양극재 가격이 하락했다고 설명 [II-3. 원재료 및 생산설비 · 줄 17]\n"
     "- 미주 매출은 133,274,900 백만원이다 [II-4. 매출 및 수주상황 · 줄 19]\n\n"
     "**기사로 쓴다면 확인할 것**\n- 가동률이 낮아진 공장은 어디인지")
+an.call_gemini = _fake_ai
 from test_plant import NOW, PREV  # 현대차 3분기 모양 가동률 표
 _orig = dc.report_text
 PLANT = "3. 원재료 및 생산설비\n(3) 가동률\n| (단위 : 대, 시간) |\n사업부문 | 법인명 | 소재지 | 기간 |\n생산능력 | 생산실적 | 가동률(%) |\n{rows}\n"

@@ -77,7 +77,7 @@ def sentences(c, period, annual):
             c["note"] = ((c.get("note") or "") + " " + NO_SENTENCE_NOTE).strip()
         return []
     try:
-        return [s for s in f(c["data"], period, "전년" if annual else "지난해 같은 기간", annual) if s]
+        return [re.sub(r"(\d)\.0(?=%)", r"\1", s) for s in f(c["data"], period, "전년" if annual else "지난해 같은 기간", annual) if s]  # 59.0% -> 59% (사내 표기)
     except (KeyError, TypeError, ZeroDivisionError):
         return []  # 자료가 모자라면 문장 없이 (카드 숫자는 그대로)
 

@@ -1,8 +1,10 @@
 """사업보고서 분석기 — 사업·반기·분기보고서를 목차 부분별로 깊게 읽는 Streamlit 앱.
 
-비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL).
+비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL, PAPER_PRIVATE_READ_TOKEN — 문체 파일 읽기 전용).
 """
+import json
 import os
+import re
 
 import requests
 import streamlit as st
@@ -16,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 23:10"
+LAST_UPDATED = "2026.11.23 23:50"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -35,6 +37,7 @@ DART_KEY = load_secret("DART_API_KEY")
 GEMINI_KEY = load_secret("GEMINI_API_KEY")
 GEMINI_MODEL = load_secret("GEMINI_MODEL") or "gemini-3.6-flash"
 GEMINI_FALLBACK = load_secret("GEMINI_FALLBACK_MODEL") or "gemini-3.5-flash-lite"
+STYLE_TOKEN = load_secret("PAPER_PRIVATE_READ_TOKEN")  # 문체 파일(paper-private) 읽기 전용
 
 
 @st.cache_resource
@@ -446,6 +449,60 @@ def render_diff(parsed):
 
 
 # ---------------- 기사 쓰기: 고른 요소를 리드부터 엮어 초안 ----------------
+def marked(text):
+    """【확인 필요】·'OO일' 자리를 형광펜으로 (HTML)."""
+    import html as _h
+    t = _h.escape(text)
+    t = re.sub(r"(【[^】]*】|OO일)", r'<mark style="background:#EEF36A">\1</mark>', t)
+    return "<div style='white-space:pre-wrap;line-height:1.75;font-size:15px'>" + t + "</div>"
+
+
+def render_frame(all_cards, picked, lead, rno):
+    """문체 틀: 문체 규칙(paper-private) + 예문 + 고른 요소의 숫자 -> Gemini 작성 -> 규칙 점검."""
+    import style as sty
+    st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체 · Gemini 무료)")
+    ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요. "
+            "작성 → 규칙 점검 두 번 AI를 부르고, 숫자는 고른 요소의 값과 대조해요.")
+    if not GEMINI_KEY:
+        ui.note("Streamlit Secrets에 GEMINI_API_KEY를 넣으면 쓸 수 있어요.")
+        return
+    try:
+        style = sty.load(get_session(), STYLE_TOKEN)
+    except sty.StyleError as e:
+        st.warning(f"문체 파일을 읽지 못했어요: {e}")
+        return
+    kind = st.radio("기사 유형", list(art.KINDS), format_func=lambda k: f"{art.KINDS[k][0]} (약 {art.KINDS[k][1]:,}자)",
+                    horizontal=True, key="f_kind")
+    data = art.facts(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
+    with st.expander("AI에 넘기는 숫자 자료 (분석 결과)"):
+        st.json(data, expanded=False)
+    if st.button("틀 만들기", type="primary", key="f_go"):
+        with st.spinner("쓰는 중... (작성 → 규칙 점검, 1분 안팎)"):
+            try:
+                system, prompt = art.write_prompt(style["rules"], sty.examples_for(style, kind), kind, data)
+                first = an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
+                system2, prompt2 = art.check_prompt(style["rules"], first)
+                body, fixes = art.split_check(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt2, system2, GEMINI_FALLBACK))
+                st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes,
+                                                 src=art.pct0(json.dumps(data, ensure_ascii=False)) + "\n" + json.dumps(data, ensure_ascii=False))
+            except an.AiError as e:
+                st.error(str(e))
+    out = st.session_state.get("f_out")
+    if out and out["rno"] == rno:
+        n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
+        ui.note(f"본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
+        bad = an.unverified_numbers(out["body"], out["src"])
+        if bad:
+            st.warning("숫자 자료에 없는 숫자가 있어요: " + ", ".join(bad) + ". 고치거나 빼 주세요.")
+        else:
+            ui.note("틀의 숫자는 모두 숫자 자료에 있어요.")
+        st.html(marked(out["body"]))
+        st.code(out["body"], language=None, wrap_lines=True)
+        with st.expander(f"규칙 점검에서 고친 곳 ({len(out['fixes'])})"):
+            st.markdown("\n".join(f"- {x}" for x in out["fixes"]) or "고친 곳 없음")
+        with st.expander("점검 전 첫 초안"):
+            st.code(out["first"], language=None, wrap_lines=True)
+
 with tab_write:
     all_cards = fast + items
     opts = art.choices(all_cards)
@@ -453,11 +510,11 @@ with tab_write:
         st.info("기사로 엮을 숫자가 아직 없어요. '기사 포인트' 탭에서 카드가 나오는지 확인해 주세요.")
     else:
         names = dict(opts)
-        ui.note("넣고 싶은 요소를 고르고, 그중 맨 앞(리드)에 올 것을 고른 뒤 '기사 만들기'를 누르세요. 리드 다음은 고른 순서대로 문단이 이어져요. 숫자는 카드와 같은 값이에요 (AI 없음).")
+        ui.note("넣고 싶은 요소를 고르고, 그중 맨 앞(리드)에 올 것을 고르세요. '재료 초안'은 카드 숫자를 그대로 이은 문장(AI 없음), 아래 '문체 틀'은 중앙일보 산업부 문체로 쓴 뼈대예요.")
         picked = st.multiselect("기사에 넣을 요소", [k for k, _ in opts], format_func=names.get, key="w_pick",
                                 placeholder="예: 실적, 가동률, 직원")
         lead = st.radio("맨 앞에 올 요소 (리드)", picked, format_func=names.get, horizontal=True, key="w_lead") if picked else None
-        if st.button("기사 만들기", type="primary", disabled=not picked, key="w_go"):
+        if st.button("재료 초안 만들기 (숫자 문장만 · AI 없음)", disabled=not picked, key="w_go"):
             draft = art.compose(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
             st.session_state["w_draft"] = dict(rno=rno, draft=draft, ai=None)
         saved = st.session_state.get("w_draft")
@@ -467,23 +524,9 @@ with tab_write:
             st.code(d["title"], language=None, wrap_lines=True)
             ui.note("본문 초안 (숫자로만 엮음 · 오른쪽 위 단추로 복사)")
             st.code(d["text"], language=None, wrap_lines=True)
-            if GEMINI_KEY:
-                if st.button("AI로 기사체 다듬기 (숫자는 초안과 대조)", key="w_ai"):
-                    with st.spinner("다듬는 중..."):
-                        try:
-                            saved["ai"] = an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, art.ai_prompt(d, corp["corp_name"]),
-                                                         art.AI_SYSTEM, GEMINI_FALLBACK)
-                        except an.AiError as e:
-                            st.error(str(e))
-                if saved.get("ai"):
-                    bad = an.unverified_numbers(saved["ai"], d["source"] + "\n" + d["title"])
-                    if bad:
-                        st.warning("다듬은 글에 초안에 없는 숫자가 있어요: " + ", ".join(bad) + ". 이 숫자는 고치거나 빼 주세요.")
-                    else:
-                        ui.note("다듬은 글의 숫자는 모두 초안과 같아요.")
-                    st.code(saved["ai"], language=None, wrap_lines=True)
-            else:
-                ui.note("AI로 다듬기를 쓰려면 Streamlit Secrets에 GEMINI_API_KEY를 넣어 주세요.")
+        if picked:
+            st.divider()
+            render_frame(all_cards, picked, lead, rno)
 
 
 for tab, fn in ((tab_toc, render_toc), (tab_ai, render_ai), (tab_diff, render_diff)):

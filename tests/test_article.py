@@ -44,6 +44,44 @@ def test_compose():
     check(art.intro("LG에너지솔루션", "사업보고서 (2025.12)", "20260310") == "LG에너지솔루션이 10일 공시한 2025년 사업보고서에 따르면", "조사·보고서 이름")
 
 
+
+def test_frame():
+    """문체 틀: 숫자 자료(JSON)·작성/점검 프롬프트·점검 답 나누기·표기."""
+    import os, tempfile
+    import style as sty
+    cards = [dict(key="income", title="실적 · 2026년 1∼9월 누적", value="영업이익 8조428억원", prev="2025년 1∼9월 영업이익 9조7700억원",
+                  change="17.7% 감소", rows=[("매출", "140조2645억원 (2025년 1∼9월 139조원, 0.9% 증가)", None)], source="DART 재무제표", note=None,
+                  sentences=["매출은 …"]),
+             dict(key="plant", title="가동률", value="88.9%", prev=None, change=None, rows=[("HMMA(미국)", "101.0%", 123)], source="II-3", note="공장별"),
+             dict(key="debt", empty="없음", title="부채", rows=[])]
+    d = art.facts(cards, ["plant", "income"], "income", "현대자동차", "분기보고서 (2026.09)", "20261116")
+    assert d["보고서"] == "2026년 3분기 보고서" and d["공시일"] == "2026.11.16" and [x["항목"] for x in d["항목"]] == ["실적 · 2026년 1∼9월 누적", "가동률"]
+    assert d["항목"][0]["리드"] and d["항목"][1]["세부"][0]["원문 줄"] == 123 and "sentences" not in str(d), "리드 먼저, 원문 줄, 기사 문장은 안 넣음"
+    system, prompt = art.write_prompt("규칙 전문", ["예문1"], "B", d)
+    assert system == "규칙 전문" and "OO일" in prompt and "멘트" in prompt and "약 1200자" in prompt and "내용(회사·숫자·사실)은 쓰지 마라" in prompt and "8조428억원" in prompt
+    body, fixes = art.split_check("제목: 가\n\n본문 1\n\n[고친 곳]\n- 전 → 후\n- 없음")
+    assert body == "제목: 가\n\n본문 1" and fixes == ["전 → 후"], (body, fixes)
+    assert art.split_check("제목: 가\n\n본문")[1] == []
+    assert art.pct0("59.0%와 1.0%p, 100.0%, 10.05%") == "59%와 1%p, 100%, 10.05%"
+    assert art.body_chars("제목: 가나\n\n12345") == 5
+    sd = tempfile.mkdtemp()
+    os.makedirs(os.path.join(sd, "examples"))
+    open(os.path.join(sd, "style_rules.md"), "w", encoding="utf-8").write("R")
+    for n in ("B_1.md", "B_2.md", "C_1.md", "A_1.md"):
+        open(os.path.join(sd, "examples", n), "w", encoding="utf-8").write(n)
+    os.environ["STYLE_DIR"] = sd
+    sty._cache.clear()
+    s = sty.load()
+    assert s["rules"] == "R" and sty.examples_for(s, "B") == ["B_1.md", "B_2.md"] and sty.examples_for(s, "C") == ["C_1.md"]
+    del os.environ["STYLE_DIR"]
+    sty._cache.clear()
+    try:
+        sty.load(token=None)
+        assert False
+    except sty.StyleError as e:
+        assert "PAPER_PRIVATE_READ_TOKEN" in str(e)
+    print("ok - 문체 틀 재료·프롬프트·점검 답·표기")
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

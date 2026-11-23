@@ -101,3 +101,37 @@ assert not at.exception, at.exception
 codes = " ".join(c.value for c in at.code)
 assert "가나전지가" in codes and "공시한 2025년 사업보고서에 따르면 2025년 매출은 9조원으로 전년보다 12.5% 증가했고" in codes, codes[:300]
 print("ok - 기사 쓰기: 요소·리드 고르고 기사 만들기")
+
+
+# ---- 문체 틀: 가짜 문체 폴더 + 가짜 Gemini(작성 -> 점검) ----
+import tempfile
+sd = tempfile.mkdtemp()
+os.makedirs(os.path.join(sd, "examples"))
+open(os.path.join(sd, "style_rules.md"), "w", encoding="utf-8").write("# 가짜 문체 규칙\n리드는 숫자 없이.")
+open(os.path.join(sd, "examples", "B_가짜.md"), "w", encoding="utf-8").write("가짜 예문 B")
+os.environ["STYLE_DIR"] = sd
+calls = []
+
+
+def fake_gemini(session, key, model, prompt, system, fallback=None):
+    calls.append((system, prompt))
+    if len(calls) == 1:
+        return "제목: 가나전지, 배터리 호조…매출 12.5% 증가\n\n가나전지 실적이 좋아졌다.\n\n가나전지가 OO일 공시한 2025년 사업보고서에 따르면 매출은 9조원이다. 【확인 필요: 원인】"
+    return ("제목: 가나전지, 배터리 호조…매출 12.5% 증가\n\n가나전지 실적이 개선됐다.\n\n가나전지가 OO일 공시한 2025년 사업보고서에 따르면 매출은 9조원이다. 【확인 필요: 원인】"
+            "\n\n[고친 곳]\n- 실적이 좋아졌다 → 실적이 개선됐다")
+
+
+an.call_gemini = fake_gemini
+at.run()
+assert not at.exception, at.exception
+at.radio(key="f_kind").set_value("B").run()
+at.button(key="f_go").click().run()
+assert not at.exception, at.exception
+assert len(calls) == 2 and "가짜 문체 규칙" in calls[0][0] and "가짜 예문 B" in calls[0][1] and "9조원" in calls[0][1], "작성 호출: 규칙·예문·숫자 자료"
+assert "규칙에 어긋난 문장만 고쳐라" in calls[1][1] and "실적이 좋아졌다" in calls[1][1], "점검 호출: 첫 초안"
+codes = " ".join(c.value for c in at.code)
+assert "실적이 개선됐다" in codes and "[고친 곳]" not in codes, "점검 뒤 기사, 고친 곳은 따로"
+html = " ".join(str(h.proto) for h in at.get("html"))
+assert "<mark" in html and "OO일" in html, "【확인 필요】·OO일 형광펜"
+assert not at.warning or all("숫자 자료에 없는" not in w.value for w in at.warning), "숫자 대조 통과"
+print("ok - 문체 틀: 작성 -> 규칙 점검, 고친 곳 따로, 자리 표시 형광펜")
