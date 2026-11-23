@@ -49,6 +49,8 @@ def rate_rows(parsed):
         if cap is None or prod is None or rep is None:
             continue
         texts = [x for x in c[:-3] if x and x.strip() not in ("-", "–") and to_num(x) is None]  # 숫자 칸(설비 용량 등)은 이름이 아님
+        row_unit = next((re.sub(r"\s+", "", x) for x in texts if UNIT_CELL.fullmatch(re.sub(r"\s+", "", x))), None)
+        texts = [x for x in texts if not UNIT_CELL.fullmatch(re.sub(r"\s+", "", x))]  # '백만개 | 톤' 단위 칸은 이름·소재지가 아님 (삼성SDI)
         if not texts or not (0 <= rep <= 200):
             continue
         if any(NOT_PLANT.search(x) for x in texts + [group]):  # 경유사용량·배출량 같은 다른 표
@@ -65,7 +67,7 @@ def rate_rows(parsed):
             name = group or "전체"
         key = (re.sub(r"\s+", "", group), re.sub(r"\s+", "", name), re.sub(r"\s+", "", place))
         out.append(dict(key=key, group=group, name=name, place=place, cap=cap, prod=prod,
-                        rate=rep, calc=prod / cap * 100 if cap else None, reported=rep, unit=unit_for(group, unit), line=no))
+                        rate=rep, calc=prod / cap * 100 if cap else None, reported=rep, unit=row_unit or unit_for(group, unit), line=no))
     return out
 
 
@@ -83,7 +85,8 @@ def total(rows, prev=False):
     return dict(cap=cap, prod=prod, rate=rate, n=len(rows))
 
 
-NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지|용수|폐기물|비\s*용|단\s*가|원\s*/")
+NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지\s*(사용|소비)|용수|폐기물|비\s*용|단\s*가|원\s*/")  # '에너지솔루션' 사업부문은 걸리지 않게
+UNIT_CELL = re.compile(r"(백만|천|만)?(개|톤|대|배럴|매|장|kg|㎏|MT|TEU|㎡|m2|M2|kL|L|Gwh|GWh|MWh)", re.I)
 
 
 def clean_name(x):

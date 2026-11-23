@@ -326,6 +326,16 @@ def test_sweep_fixes():
            "V. 회계감사인의 감사의견 등\nx\n")
     rows = plant.rate_rows(rp.parse_report(txt))
     check(len(rows) == 1 and rows[0]["place"] == "", "'-' 소재지는 비우고, 경유사용량·음수 가동률 줄은 뺌 (HMM·CJ제일제당)")
+    sdi = ("II. 사업의 내용\n3. 원재료 및 생산설비\n(단위 : 억원)\n② 당해 사업연도의 가동률\n"
+           "사업부문 | 품 목 | 단 위 | 생산능력 | 생산실적 | 평균가동률 |\n"
+           "에너지솔루션 | 소형전지 | 백만개 | 1,775 | 1,393 | 78% |\n"
+           "전자재료 | EMC | 톤 | 3,447 | 982 | 29% |\n"
+           "V. 회계감사인의 감사의견 등\nx\n")
+    sr = plant.rate_rows(rp.parse_report(sdi))
+    check([(r["group"], r["name"], r["place"], r["unit"]) for r in sr] == [("에너지솔루션", "소형전지", "", "백만개"), ("전자재료", "EMC", "", "톤")],
+          "삼성SDI: '에너지솔루션' 부문은 남기고, 단위 칸은 단위로 (소재지 아님)")
+    sc = {x["key"]: x for x in pt.build_cards(rp.parse_report(sdi), None, None)}["plant"]
+    check("에너지솔루션" in sc["title"] and sc["value"] == "78.0%", "대표 가동률은 표 첫 사업부문(본업)")
     mat = ("II. 사업의 내용\n3. 원재료 및 생산설비\n가. 주요 원재료\n"
            "매입유형 | 품목 | 용도 | 매입액(억원) | 비중 |\n"
            "원재료 | 편광판 | 패널 | 10,544 | 15.4% |\n"
