@@ -76,7 +76,9 @@ def change_text(now, prev, pct=True):
             return None
         c = (now - prev) / abs(prev) * 100
         return f"{abs(c):.1f}% {'증가' if c >= 0 else '감소'}"
-    d = now - prev
+    d = round(now - prev, 4)
+    if d == 0:
+        return "변동 없음"
     return f"{abs(d):,.2f}%p {'상승' if d >= 0 else '하락'}".replace(".00%p", "%p")
 
 
@@ -136,6 +138,11 @@ def invest_changes(parsed):
     return rows, money, shares
 
 
+def pct_or_dash(x):
+    v = to_num(x)
+    return "-" if v is None else f"{x.rstrip('%')}%"
+
+
 def money_text(v, unit):
     if v is None:
         return "-"
@@ -146,14 +153,27 @@ def money_text(v, unit):
 
 def consol_list(parsed):
     """XII-1 연결대상 종속회사 현황(상세) -> (회사 이름 목록, 요약 문장(줄, 글) 또는 None)."""
-    names, summary = [], None
+    names, summary, ncol = [], None, None
     for no, t in block_lines(parsed, "detail_consol"):
         if summary is None and "|" not in t and re.search(r"\d+\s*개", t) and re.search(r"종속", t):
             summary = (no, t)
         c = cells(t)
-        if len(c) >= 6 and not c[0].startswith(("상호", "회사명", "법인명")) and re.search(r"\d", " ".join(c[1:])):
+        if ncol is None and c and c[0].replace(" ", "").startswith(("상호", "회사명", "법인명")):
+            ncol = len(c)  # 첫 표의 머리글 칸 수
+            continue
+        if ncol is None:
+            continue
+        if names and "|" not in t:
+            break  # 첫 표가 끝남 (뒤의 변동 내역 표 등은 세지 않는다)
+        if len(c) == ncol and re.search(r"\d", " ".join(c[1:])):
             names.append((no, c[0]))
     return names, summary
+
+
+def stated_count(summary):
+    """'연결대상 종속기업은 2025년말 현재 308개사입니다' -> 308."""
+    m = re.search(r"(\d[\d,]*)\s*개\s*(?:사|회사|법인|기업)", summary[1]) if summary else None
+    return to_num(m.group(1)) if m else None
 
 
 def row_numbers(t):
@@ -179,6 +199,28 @@ def rnd_ratio(parsed):
         return None
     out["unit"] = unit
     return out
+
+
+def plant_lines(parsed, limit=10):
+    """'가동률'이 든 줄과, 그 바로 뒤 표 줄(숫자가 든 '|' 줄, 6줄까지)."""
+    lines = block_lines(parsed, "biz_plant")
+    out, seen = [], set()
+    for idx, (no, t) in enumerate(lines):
+        if "가동률" not in t:
+            continue
+        group = [(no, t)]
+        for no2, t2 in lines[idx + 1:idx + 9]:
+            if "|" in t2 and re.search(r"\d", t2):
+                group.append((no2, t2))
+            if len(group) >= 7:
+                break
+        for no2, t2 in group:
+            if no2 not in seen:
+                seen.add(no2)
+                out.append((no2, t2[:220]))
+        if len(out) >= limit:
+            break
+    return out[:limit]
 
 
 def find_lines(parsed, blocks, pattern, limit=8):
@@ -248,9 +290,12 @@ def top_pay(*jos):
     people = {}
     for jo in jos:
         for r in dart_rows(jo, ["nm", "mendng_totamt"]):
-            amt, nm = to_num(r.get("mendng_totamt")), re.sub(r"\s+", "", str(r.get("nm", "")))
+            raw = [x.strip() for x in str(r.get("nm", "")).split("\n") if x.strip()]
+            name = raw[-1] if raw else ""  # '회장\n정의선', '전) 부사장\n김동욱' -> 마지막 줄이 이름
+            amt, nm = to_num(r.get("mendng_totamt")), re.sub(r"\s+", "", name)
+            ofcps = re.sub(r"\s+", " ", str(r.get("ofcps", "") or "")).strip()
             if nm and amt is not None and (nm not in people or amt > people[nm][2]):
-                people[nm] = (str(r["nm"]).strip(), str(r.get("ofcps", "") or "").strip(), amt)
+                people[nm] = (name, ofcps, amt)
     return sorted(people.values(), key=lambda p: -p[2])
 
 
@@ -350,7 +395,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         lines = []
         for r in rows[:6]:
             amt = money_text(r["amount"], money)
-            lines.append((f"{r['name']} — {r['kind']}", f"{amt} · 지분율 {r['rate0'] or '-'}% → {r['rate1'] or '-'}%", r["line"]))
+            lines.append((f"{r['name']} — {r['kind']}", f"{amt} · 지분율 {pct_or_dash(r['rate0'])} → {pct_or_dash(r['rate1'])}", r["line"]))
         out.append(card("invest", "타법인 출자 변동", value=f"{len(rows)}곳", note="취득·처분 금액이 큰 순 (평가손익만 바뀐 곳은 뺌)",
                         rows=lines, source=f"{rp.REPORT_BLOCK_LABELS['detail_invest']} · 단위 {money or '?'}"))
     elif "detail_invest" in parsed["blocks"]:
@@ -375,8 +420,11 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
             if gone:
                 rows2.append(("빠짐", ", ".join(gone[:5]) + (f" 외 {len(gone) - 5}곳" if len(gone) > 5 else ""), None))
             note = "회사 이름으로 1년 전 보고서 표와 대조했어요 (이름이 바뀐 회사는 들어옴·빠짐으로 함께 보일 수 있어요)."
-        out.append(card("consol", "연결 종속회사", value=f"{len(names)}곳", prev=f"{len(prev_names)}곳" if prev_names else None,
-                        change=(f"{len(names) - len(prev_names):+d}곳" if prev_names else None), note=note, rows=rows2,
+        said = stated_count(summary)
+        if said and said != len(names):
+            note = (note + " " if note else "") + f"표의 행은 {len(names)}곳이에요 (보고서 문장의 숫자를 위에 적었어요)."
+        out.append(card("consol", "연결 종속회사", value=f"{said or len(names)}곳", prev=f"{len(prev_names)}곳" if prev_names else None,
+                        change=(f"{len(names) - len(prev_names):+d}곳 (표 행 기준)" if prev_names else None), note=note, rows=rows2,
                         source=rp.REPORT_BLOCK_LABELS["detail_consol"]))
 
     if api:
@@ -420,7 +468,8 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         if t1:
             rows6 += [("자사주 취득", f"{t1['acq']:,}주", None), ("자사주 소각", f"{t1['burn']:,}주", None), ("기말 보유", f"{t1['end']:,}주", None)]
         if d["now"]["total"]:
-            rows6.append(("현금배당 총액", won_text(d["now"]["total"]) + (f" ({change_text(d['now']['total'], d['prev']['total'])})" if d["prev"]["total"] else ""), None))
+            cmp = f" (전기 대비 {change_text(d['now']['total'], d['prev']['total'])})" if d["prev"]["total"] and reprt == "11011" else ""
+            rows6.append(("현금배당 총액" if reprt == "11011" else "현금배당 총액(이번 기간)", won_text(d["now"]["total"]) + cmp, None))
         if d["now"]["dps"]:
             rows6.append(("주당 배당금(보통주)", f"{d['now']['dps']:,}원", None))
         if d["now"]["payout"] is not None:
@@ -430,7 +479,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
                             source="DART 정기보고서 주요정보 · 자기주식·배당", lines=[rp.block_first_line(parsed, "co_shares")]))
 
     # 7) 가동률 (계산 안 함)
-    hits = find_lines(parsed, ["biz_plant"], r"가동률")
+    hits = plant_lines(parsed)
     if hits:
         out.append(card("plant", "가동률 (원문 줄)", rows=[("", t, no) for no, t in hits],
                         note="회사마다 표 모양이 달라 계산하지 않고 원문 줄을 그대로 보여 줘요.", source=rp.REPORT_BLOCK_LABELS["biz_plant"]))
@@ -440,13 +489,21 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         rows8 = []
         if "cost" in r:
             c, c0, no = r["cost"]
-            rows8.append(("연구개발비", money_text(c, r["unit"]) + (f" (전기 {money_text(c0, r['unit'])}, {change_text(c, c0)})" if c0 else ""), no))
+            if reprt == "11011":
+                extra = f" (전기 {money_text(c0, r['unit'])}, {change_text(c, c0)})" if c0 else ""
+            else:  # 반기·분기 표의 둘째 칸은 직전 사업연도 전체라 증감을 내지 않는다
+                extra = f" (직전 사업연도 전체 {money_text(c0, r['unit'])})" if c0 else ""
+            rows8.append(("연구개발비", money_text(c, r["unit"]) + extra, no))
         ratio = r.get("ratio")
-        out.append(card("rnd", "연구개발비 / 매출액", value=f"{ratio[0]}%" if ratio else None, prev=f"{ratio[1]}%" if ratio and ratio[1] is not None else None,
+        note8 = None if reprt == "11011" else "반기·분기 비율을 직전 사업연도 전체 비율과 비교한 값이에요."
+        out.append(card("rnd", "연구개발비 / 매출액", note=note8, value=f"{ratio[0]}%" if ratio else None, prev=f"{ratio[1]}%" if ratio and ratio[1] is not None else None,
                         change=change_text(ratio[0], ratio[1], pct=False) if ratio and ratio[1] is not None else None,
                         rows=rows8, lines=[ratio[2]] if ratio else [], source=rp.REPORT_BLOCK_LABELS["biz_rnd"]))
     # 9) 지역별 매출 (계산 안 함)
-    hits = find_lines(parsed, ["biz_sales", "note_segment"], r"미주|미국|북미|유럽|중국|아시아|국내|내수|수출|해외", limit=8)
+    hits = find_lines(parsed, ["biz_sales", "note_segment"], r"미주|미국|북미|유럽|중국|아시아|인도|중남미|중동|아프리카|일본", limit=8)
+    if len(hits) < 3:
+        more = find_lines(parsed, ["biz_sales", "note_segment"], r"국내|내수|수출|해외", limit=8)
+        hits += [h for h in more if h not in hits][:8 - len(hits)]
     if hits:
         out.append(card("region", "지역별 매출 (원문 줄)", rows=[("", t, no) for no, t in hits],
                         note="지역 이름이 든 줄을 찾아 보여 줘요. 비중은 원문 표로 확인하세요.", source="II-4. 매출 및 수주상황 · 부문 정보 주석"))

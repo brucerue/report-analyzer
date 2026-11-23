@@ -10,6 +10,8 @@ REPORT = """II. 사업의 내용
 3. 원재료 및 생산설비
 (단위 : 대, %) |
 구 분 | 2026년 상반기 | 2025년 |
+(3) 가동률
+공장 | 2026년 상반기 | 2025년 |
 가동률 | 국내공장 | 86.2 | 94.4 |
 6. 주요계약 및 연구개발활동
 (2) 연구개발비용
@@ -64,11 +66,11 @@ def test_invest_and_consol():
     check(money == "백만원" and shares == "천주", "표 단위")
     check("삼성SDI" in p["lines"][rows[0]["line"] - 1], "줄 번호가 그 행을 가리킴")
     names, summary = pt.consol_list(p)
-    check(len(names) == 2 and summary and "308개사" in summary[1], "종속회사 행 세기와 요약 문장")
+    check(len(names) == 2 and summary and "308개사" in summary[1] and pt.stated_count(summary) == 308, "종속회사 행 세기(첫 표만)와 문장 속 숫자")
     prev = rp.parse_report(REPORT.replace("NEWCO{x} | 2025. 03 | Seoul | 투자 | 1,000 | 상동 | X |\n", "").replace("{x}", ""))
     cards = pt.build_cards(p, prev, None)
     c = next(c for c in cards if c["key"] == "consol")
-    check(c["value"] == "2곳" and c["change"] == "+1곳" and any(r[0] == "새로 들어옴" and r[1] == "NEWCO" for r in c["rows"]), "종속회사 1년 전과 대조 (새로 들어온 회사)")
+    check(c["value"] == "308곳" and c["change"] == "+1곳 (표 행 기준)" and "표의 행은 2곳" in c["note"] and any(r[0] == "새로 들어옴" and r[1] == "NEWCO" for r in c["rows"]), "종속회사 1년 전과 대조 (새로 들어온 회사)")
 
 
 def test_rnd_plant_region():
@@ -77,7 +79,10 @@ def test_rnd_plant_region():
     check(r["cost"][:2] == (2388938, 4589424) and r["ratio"][:2] == (2.5, 2.6) and r["unit"] == "백만원", "R&D 비용·비율 (당기가 앞 칸, 정부보조금 줄 무시)")
     cards = {c["key"]: c for c in pt.build_cards(p, None, None)}
     check(cards["rnd"]["value"] == "2.5%" and cards["rnd"]["change"] == "0.10%p 하락", "R&D 카드")
-    check("86.2" in cards["plant"]["rows"][0][1] and cards["plant"]["rows"][0][2], "가동률 원문 줄 (계산 없이)")
+    half = {c["key"]: c for c in pt.build_cards(p, None, None, reprt="11012")}
+    check("직전 사업연도 전체" in half["rnd"]["rows"][0][1] and "감소" not in half["rnd"]["rows"][0][1], "반기 R&D는 연간 금액과 증감을 내지 않음")
+    check(pt.change_text(30.67, 30.67, pct=False) == "변동 없음", "변동 없음")
+    check(cards["plant"]["rows"][0][1] == "(3) 가동률" and any("86.2" in r[1] and r[2] for r in cards["plant"]["rows"]), "가동률 제목 줄과 그 아래 표 줄 (계산 없이)")
     check(any("미주" in r[1] for r in cards["region"]["rows"]), "지역별 매출 원문 줄")
 
 
@@ -90,7 +95,8 @@ def test_api_cards():
                    {"nm": "계", "relate": "-", "stock_knd": "보통주", "bsis_posesn_stock_qota_rt": "20.08", "trmend_posesn_stock_qota_rt": "19.92"}]}
     mr = {"list": [{"se": "소액주주", "shrholdr_co": "4,240,000", "hold_stock_rate": "70.1"}]}
     mr0 = {"list": [{"se": "소액주주", "shrholdr_co": "4,000,000", "hold_stock_rate": "70.0"}]}
-    pay = {"list": [{"nm": "이원진", "ofcps": "사장", "mendng_totamt": "7,305,000,000"}, {"nm": "노 태문", "ofcps": "사장", "mendng_totamt": "6,125,000,000"}]}
+    pay = {"list": [{"nm": "이원진", "ofcps": "사장", "mendng_totamt": "7,305,000,000"}, {"nm": "노 태문", "ofcps": "사장", "mendng_totamt": "6,125,000,000"},
+                    {"nm": "회장\n이원진", "ofcps": "사장", "mendng_totamt": "7,305,000,000"}]}
     ts = {"list": [{"stock_knd": "보통주", "acqs_mth1": "총계", "bsis_qy": "0", "change_qy_acqs": "100", "change_qy_dsps": "0", "change_qy_incnr": "50", "trmend_qy": "50"}]}
     al = {"list": [{"se": "현금배당금총액(백만원)", "thstrm": "11,000,000", "frmtrm": "9,800,000"},
                    {"se": "주당 현금배당금(원)", "stock_knd": "보통주", "thstrm": "1,668", "frmtrm": "1,446"},
@@ -101,7 +107,7 @@ def test_api_cards():
     cards = {c["key"]: c for c in pt.build_cards(p, None, lambda n: data.get(n, (None, None)))}
     check(cards["staff"]["value"] == "2,000명" and cards["staff"]["change"] == "5.3% 증가", "직원 수 (합계 줄 빼고 더함)")
     check("1억5800만원" in cards["staff"]["rows"][0][1] and "1억3000만원" in cards["staff"]["rows"][0][1], "1인 평균 급여와 1년 전")
-    check(cards["pay"]["value"] == "이원진 73억500만원".replace("73억500만원", pt.won_text(7_305_000_000)), "최고 보수")
+    check(cards["pay"]["value"] == "이원진 " + pt.won_text(7_305_000_000) and len(cards["pay"]["rows"]) == 2, "최고 보수 (이름 앞 직위 줄 떼고 한 사람으로)")
     check(cards["holder"]["value"] == "19.92%" and cards["holder"]["change"] == "0.16%p 하락", "최대주주 지분 (기초 대비)")
     check(any("4,240,000명" in r[1] and "6.0% 증가" in r[1] for r in cards["holder"]["rows"]), "소액주주 수 변화")
     check(any(r[0] == "현금배당 총액" and "11조원" in r[1] for r in cards["return"]["rows"]) and cards["return"]["value"] == "소각 50주", "자사주·배당")
