@@ -6,6 +6,9 @@ on:
       group:
         description: "묶음 (1~5, all이면 다섯 묶음을 동시에)"
         default: "all"
+      plant:
+        description: "가동률 원문 줄도 찍기 (yes/no)"
+        default: "no"
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -13,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: ${{ inputs.group == 'all' && fromJSON('["1","2","3","4","5"]') || fromJSON(format('["{0}"]', inputs.group)) }}
+        group: ${{ inputs.group == 'all' && fromJSON('["1","2","3","4","5","6"]') || fromJSON(format('["{0}"]', inputs.group)) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,3 +26,4 @@ jobs:
       - run: python tools/sweep.py ${{ matrix.group }}
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          SWEEP_PLANT: ${{ inputs.plant == 'yes' && '1' || '' }}

@@ -24,6 +24,7 @@ GROUPS = {
     "2": [("철강", "현대제철"), ("조선", "HD현대중공업"), ("건설", "현대건설"), ("자동차부품", "현대모비스"), ("방산", "한화에어로스페이스")],
     "3": [("항공", "대한항공"), ("해운", "HMM"), ("통신", "SK텔레콤"), ("유통", "이마트"), ("식품", "CJ제일제당")],
     "4": [("바이오", "삼성바이오로직스"), ("제약", "유한양행"), ("게임", "크래프톤"), ("인터넷", "NAVER"), ("전력", "한국전력공사")],
+    "6": [("2차전지(가동률 확인)", "삼성SDI"), ("2차전지", "에코프로비엠"), ("반도체", "삼성전자")],
     "5": [("보험", "삼성화재"), ("증권", "미래에셋증권"), ("기계·에너지", "두산에너빌리티"), ("코스닥 장비", "리노공업"), ("코스닥 화장품", "에이피알")],
 }
 
@@ -123,6 +124,12 @@ def one(session, cache, key, corps, sector, name):
         return memo["fin"]
 
     cards = pt.build_cards(parsed, prev_parsed, api, reprt, fin_api, period=period)
+    if parsed and os.environ.get("SWEEP_PLANT"):  # 가동률 표 고르기 확인용: 원문 줄과 읽힌 묶음
+        print("  --- 가동률 원문 줄 ---")
+        for no, t in pt.plant_lines(parsed, limit=40):
+            print(f"      {no}: {t[:200]}")
+        for st_ in plant.compare(parsed, prev_parsed)["sets"]:
+            print(f"      묶음 [{st_['label']} · {st_['unit']}] {len(st_['rows'])}줄 합산 {st_['now']['rate']} 능력합 {st_['now']['cap']}")
     for cd in cards:
         if cd.get("empty"):
             print(f"  [{cd['title']}] (없음) {cd['empty'][:90]}")

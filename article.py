@@ -95,8 +95,15 @@ APP_RULES = (
     "4. 출처 문장은 '○○가 OO일 공시한 {보고서}에 따르면' 틀로 쓴다('실적을 발표하며'를 쓰지 않는다).\n"
     "5. 비교 기준은 하나만 쓴다(기간 값은 전년 동기). 직전 분기 등 다른 비교는 꼭 필요할 때 한 문장만.\n"
     "6. 숫자는 [분석 결과]에 있는 값만, 표기 그대로 쓴다(퍼센트 소수점 0만 떼어 '59%'). 새로 계산하지 않는다. 없으면 【확인 필요: 무엇】.\n"
-    "7. 원인·전망·평가는 [분석 결과]에 없으면 쓰지 않고 【확인 필요: 원인 등】으로 자리만 둔다.\n"
+    "7. 원인·전망·평가는 [분석 결과]에 없으면 쓰지 않고 【확인 필요: 원인 등】으로 자리만 둔다. 리드 둘째 문장에 이유가 필요하면 그 자리에 【확인 필요: 실적 배경】을 둔다.\n"
+    "8. '이번 분기 실적' 항목이 있으면 B형은 그 분기(예: 3분기 7∼9월) 실적을 제목·리드·첫 숫자 단락에 앞세우고, 누적(1∼9월) 실적은 한 문장으로만 쓴다.\n"
+    "9. 비교는 전년 동기 하나로 쓴다. 직전 분기 비교는 이번 분기가 적자이거나 흑자로 돌아섰을 때 흐름을 보여 줄 때만 한 문장. 적자에서 바뀐 영업이익률(마이너스 이익률)은 쓰지 않는다.\n"
+    "10. 같은 동사('기록했다' 등)를 되풀이하지 않는다. '지난해 같은 기간'·'전년 동기'로 쓰고 '2025년 1∼9월' 같은 연도 표기를 섞지 않는다.\n"
+    "11. [분석 결과]의 세부 숫자를 다 쓰지 않는다. 기사 흐름에 필요한 핵심만 고르고 나머지는 버린다.\n"
 )
+
+DROP_ROWS = ("무형자산 취득", "부채총계")  # 기사에 거의 쓰지 않는 보조 줄 (AI가 다 써 버리지 않게 넘기지 않음)
+QTR_ROW = re.compile(r"분기\(\d+∼\d+월\)")
 
 
 def pct0(text):
@@ -111,14 +118,19 @@ def facts(cards, picked, lead, corp, report_name, filed):
     items = []
     for k in order:
         c = by[k]
-        one = {"항목": c["title"], "리드": k == lead}
+        q_rows = [r for r in c["rows"] if k == "income" and QTR_ROW.search(r[0])]
+        if q_rows:  # 분기·반기 보고서: 이번 분기(3개월) 실적을 따로 앞세움
+            items.append({"항목": "이번 분기 실적 · " + q_rows[0][0][:QTR_ROW.search(q_rows[0][0]).end()],
+                          "리드": k == lead, "세부": [{"이름": a, "값": b} for a, b, _ in q_rows], "출처": c.get("source") or ""})
+        one = {"항목": c["title"] + (" (누적)" if q_rows and "누적" not in c["title"] else ""), "리드": False if q_rows else k == lead}
         if c.get("value"):
             one["값"] = c["value"]
         if c.get("prev"):
             one["비교 대상"] = c["prev"]
         if c.get("change"):
             one["증감"] = c["change"]
-        rows = [{"이름": a, "값": b, **({"원문 줄": n} if n else {})} for a, b, n in c["rows"][:8] if b]
+        rows = [{"이름": a, "값": b, **({"원문 줄": n} if n else {})} for a, b, n in c["rows"][:8]
+                if b and a not in DROP_ROWS and (a, b, n) not in q_rows]
         if rows:
             one["세부" if k != "reason" else "회사 설명"] = rows
         if c.get("note"):

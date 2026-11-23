@@ -57,6 +57,11 @@ def test_frame():
     d = art.facts(cards, ["plant", "income"], "income", "현대자동차", "분기보고서 (2026.09)", "20261116")
     assert d["보고서"] == "2026년 3분기 보고서" and d["공시일"] == "2026.11.16" and [x["항목"] for x in d["항목"]] == ["실적 · 2026년 1∼9월 누적", "가동률"]
     assert d["항목"][0]["리드"] and d["항목"][1]["세부"][0]["원문 줄"] == 123 and "sentences" not in str(d), "리드 먼저, 원문 줄, 기사 문장은 안 넣음"
+    cards[0]["rows"] += [("2026년 3분기(7∼9월) 매출", "46조원 (2025년 3분기 대비 3.4% 감소)", None), ("무형자산 취득", "1억원", None)]
+    d2 = art.facts(cards, ["income"], "income", "현대자동차", "분기보고서 (2026.09)", "20261116")
+    names = [x["항목"] for x in d2["항목"]]
+    assert names == ["이번 분기 실적 · 2026년 3분기(7∼9월)", "실적 · 2026년 1∼9월 누적"] and d2["항목"][0]["리드"] and not d2["항목"][1]["리드"], names
+    assert "무형자산" not in str(d2) and str(d2).count("46조원") == 1, "분기 줄은 따로 한 번, 보조 줄은 뺌"
     system, prompt = art.write_prompt("규칙 전문", ["예문1"], "B", d)
     assert system == "규칙 전문" and "OO일" in prompt and "멘트" in prompt and "약 1200자" in prompt and "내용(회사·숫자·사실)은 쓰지 마라" in prompt and "8조428억원" in prompt
     body, fixes = art.split_check("제목: 가\n\n본문 1\n\n[고친 곳]\n- 전 → 후\n- 없음")
