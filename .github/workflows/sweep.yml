@@ -1,0 +1,25 @@
+name: sweep
+# 업종별 골든 점검 (수동 실행): 업종 대표 25곳의 최근 정기보고서로 카드·기사 문장·초안을 찍고 이상한 값을 표시. 공개 저장소라 무료.
+on:
+  workflow_dispatch:
+    inputs:
+      group:
+        description: "묶음 (1~5, all이면 다섯 묶음을 동시에)"
+        default: "all"
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ inputs.group == 'all' && fromJSON('["1","2","3","4","5"]') || fromJSON(format('["{0}"]', inputs.group)) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python tools/sweep.py ${{ matrix.group }}
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
