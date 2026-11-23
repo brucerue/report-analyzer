@@ -244,8 +244,11 @@ def test_income():
     check(inc["cum"]["now"]["net"] == -1200, "'분기순손실' 이름이면 양수도 손실")
     check(pt.profit_change(2000, -1000) == "흑자 전환" and pt.profit_change(-5, 3) == "적자 전환" and pt.profit_change(-3, -5) == "적자 축소", "흑자·적자 전환")
     fin = dict(pt.fin_stats(q3), fs="연결")
-    c = {x["key"]: x for x in pt.build_cards(None, None, None, reprt="11014", fin_api=lambda: fin, part="fast")}["income"]
-    check(c["title"] == "실적 (누적)" and c["change"] == "10.0% 감소" and any("이번 분기(3개월) 영업이익" in r[0] and "흑자 전환" in r[1] for r in c["rows"]), "실적 카드 (누적 + 이번 분기)")
+    c = {x["key"]: x for x in pt.build_cards(None, None, None, reprt="11014", fin_api=lambda: fin, part="fast", period="2026년 1∼9월")}["income"]
+    check(c["title"] == "실적 · 2026년 1∼9월 누적" and c["prev"].startswith("2025년 1∼9월 영업이익") and c["change"] == "10.0% 감소", "실적 카드 제목·비교에 기간 (2026년 1∼9월 누적, 2025년 1∼9월)")
+    check(any(r[0] == "2026년 3분기(7∼9월) 영업이익" and "2025년 3분기 대비 흑자 전환" in r[1] for r in c["rows"]), "분기 줄: 2026년 3분기(7∼9월), 2025년 3분기 대비")
+    check(pt.period_labels("2025년", "11011")["prev"] == "2024년" and pt.period_labels("2026년 상반기", "11012")["q_now"] == "2026년 2분기(4∼6월)"
+          and pt.period_labels("2026년 1분기", "11013")["title"] == "2026년 1분기", "기간 이름 (사업·반기·1분기)")
     loss = dict(pt.fin_stats([dict(r, thstrm_add_amount="", frmtrm_add_amount="", thstrm_amount=r["thstrm_amount"].replace("2,000", "-34,000000000").replace("46,000", "2531000000000").replace("500", "-81000000000"),
                                    frmtrm_amount=r["frmtrm_amount"].replace("-1,000", "112000000000").replace("43,000", "2774000000000").replace("-300", "54000000000")) for r in q3]), fs="연결")
     lc = {x["key"]: x for x in pt.build_cards(None, None, None, fin_api=lambda: loss, part="fast")}["income"]

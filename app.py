@@ -8,6 +8,7 @@ import requests
 import streamlit as st
 
 import analyses as an
+import article as art
 import compare as cp
 import dart_client as dc
 import plant
@@ -15,7 +16,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 17:42"
+LAST_UPDATED = "2026.11.23 20:16"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -268,7 +269,8 @@ def load_parsed(rcept_no, label):
     return parsed, None
 
 
-tab_point, tab_toc, tab_ai, tab_diff = st.tabs(["기사 포인트", "목차별 보기", "AI 분석", "달라진 문장"])
+tab_point, tab_write, tab_toc, tab_ai, tab_diff = st.tabs(["기사 포인트", "기사 쓰기", "목차별 보기", "AI 분석", "달라진 문장"])
+PERIOD = period_phrase(row)
 year, reprt = pt.reprt_of(row)
 memo = {}
 
@@ -300,7 +302,7 @@ with tab_point:
     prev_row = dc.find_prev_periodic(rows, row)
     ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 재무제표·구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
     with st.spinner("DART 자료로 숫자를 모으는 중..."):
-        fast = pt.build_cards(None, None, api if year else None, reprt or "11011", fin_api if year else None, part="fast")
+        fast = pt.build_cards(None, None, api if year else None, reprt or "11011", fin_api if year else None, part="fast", period=PERIOD)
     if fast:
         ui.cards(fast)
     doc_area = st.container()
@@ -308,13 +310,13 @@ with tab_point:
 # ---------------- 2) 원문을 받아 나머지 ----------------
 with doc_area:
     parsed, doc_err = load_parsed(rno, "이번 보고서")
-    prev_parsed = None
+    prev_parsed, items = None, []
     if parsed is not None and prev_row:
         prev_parsed, _ = load_parsed(str(prev_row["rcept_no"]).strip(), "1년 전 같은 기간 보고서")
     if parsed is None:
         st.error(doc_err)
     else:
-        items = pt.build_cards(parsed, prev_parsed, None, reprt or "11011", None, part="doc")
+        items = pt.build_cards(parsed, prev_parsed, None, reprt or "11011", None, part="doc", period=PERIOD)
         if items:
             ui.cards(items)
         cite = sorted({ln for c in fast + items for ln in ([r[2] for r in c["rows"]] + c["lines"]) if ln})
@@ -330,10 +332,7 @@ with doc_area:
             ui.note("보고서의 '생산능력 | 생산실적 | 가동률' 표를 읽었어요. 1년 전은 같은 기간 보고서의 같은 공장끼리 비교해요.")
             for one in pres["sets"]:
                 ui.plant_table(one)
-                lines = plant.sentences(one, period_phrase(row), annual="사업" in dc.report_kind_of(row.get("report_nm")))
-                if lines:
-                    ui.note("기사용 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
-                    st.code("\n".join(lines), language=None, wrap_lines=True)
+            ui.note("가동률 기사 문장은 '기사 쓰기' 탭에서 다른 요소와 함께 엮을 수 있어요.")
         found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
         missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
         with st.expander(f"이 보고서에서 찾은 부분 {len(found)}개 (원문 전체 {len(parsed['lines']):,}줄)"):
@@ -435,6 +434,47 @@ def render_diff(parsed):
                         st.error(str(e))
                 if truncated:
                     ui.note(f"바뀐 문장이 많아 앞 {an.MAX_REPORT_CHARS:,}자까지만 AI에 보냈어요.")
+
+
+# ---------------- 기사 쓰기: 고른 요소를 리드부터 엮어 초안 ----------------
+with tab_write:
+    all_cards = fast + items
+    opts = art.choices(all_cards)
+    if not opts:
+        st.info("기사로 엮을 숫자가 아직 없어요. '기사 포인트' 탭에서 카드가 나오는지 확인해 주세요.")
+    else:
+        names = dict(opts)
+        ui.note("넣고 싶은 요소를 고르고, 그중 맨 앞(리드)에 올 것을 고른 뒤 '기사 만들기'를 누르세요. 리드 다음은 고른 순서대로 문단이 이어져요. 숫자는 카드와 같은 값이에요 (AI 없음).")
+        picked = st.multiselect("기사에 넣을 요소", [k for k, _ in opts], format_func=names.get, key="w_pick",
+                                placeholder="예: 실적, 가동률, 직원")
+        lead = st.radio("맨 앞에 올 요소 (리드)", picked, format_func=names.get, horizontal=True, key="w_lead") if picked else None
+        if st.button("기사 만들기", type="primary", disabled=not picked, key="w_go"):
+            draft = art.compose(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
+            st.session_state["w_draft"] = dict(rno=rno, draft=draft, ai=None)
+        saved = st.session_state.get("w_draft")
+        if saved and saved["rno"] == rno:
+            d = saved["draft"]
+            ui.note("제목 후보")
+            st.code(d["title"], language=None, wrap_lines=True)
+            ui.note("본문 초안 (숫자로만 엮음 · 오른쪽 위 단추로 복사)")
+            st.code(d["text"], language=None, wrap_lines=True)
+            if GEMINI_KEY:
+                if st.button("AI로 기사체 다듬기 (숫자는 초안과 대조)", key="w_ai"):
+                    with st.spinner("다듬는 중..."):
+                        try:
+                            saved["ai"] = an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, art.ai_prompt(d, corp["corp_name"]),
+                                                         art.AI_SYSTEM, GEMINI_FALLBACK)
+                        except an.AiError as e:
+                            st.error(str(e))
+                if saved.get("ai"):
+                    bad = an.unverified_numbers(saved["ai"], d["source"] + "\n" + d["title"])
+                    if bad:
+                        st.warning("다듬은 글에 초안에 없는 숫자가 있어요: " + ", ".join(bad) + ". 이 숫자는 고치거나 빼 주세요.")
+                    else:
+                        ui.note("다듬은 글의 숫자는 모두 초안과 같아요.")
+                    st.code(saved["ai"], language=None, wrap_lines=True)
+            else:
+                ui.note("AI로 다듬기를 쓰려면 Streamlit Secrets에 GEMINI_API_KEY를 넣어 주세요.")
 
 
 for tab, fn in ((tab_toc, render_toc), (tab_ai, render_ai), (tab_diff, render_diff)):

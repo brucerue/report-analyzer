@@ -82,3 +82,22 @@ assert "영업이익 5000억원" in html_all, "실적 카드는 원문 없이 �
 assert any("90초를 넘어" in e.value for e in at.error), "원문 오류 안내"
 assert any("원문을 받지 못해" in i.value for i in at.info), "다른 탭 안내"
 print("ok - 원문을 못 받아도 빠른 카드(실적)는 보이고 다른 탭은 안내")
+
+
+# ---- 기사 쓰기: 요소 고르고 리드 정하면 초안 ----
+st.cache_resource.clear()
+dc.report_text = lambda s, c, key, rno, **k: fake_report(rate="47.2" if rno.startswith("2026") else "60.1")
+pt.fetch_api = lambda *a, **k: None
+at = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "app.py"), default_timeout=30).run()
+at.text_input[0].input("가나전지")
+at.button[0].click().run()
+assert not at.exception, at.exception
+ms = at.multiselect(key="w_pick")
+assert "실적 · 2025년" in ms.options, ms.options
+ms.set_value(["income"]).run()
+at.radio(key="w_lead").set_value("income").run()
+at.button(key="w_go").click().run()
+assert not at.exception, at.exception
+codes = " ".join(c.value for c in at.code)
+assert "가나전지가" in codes and "공시한 2025년 사업보고서에 따르면 2025년 매출은 9조원으로 전년보다 12.5% 증가했고" in codes, codes[:300]
+print("ok - 기사 쓰기: 요소·리드 고르고 기사 만들기")
