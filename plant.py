@@ -89,6 +89,8 @@ NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지|용수|폐기�
 def clean_name(x):
     """긴 품목 칸 줄이기: 'EV용 배터리, ESS용 배터리,소형 … 등(국내: 오창 등해외: …)' -> 'EV용 배터리, ESS용 배터리 등'."""
     x = re.sub(r"\s+", " ", str(x)).strip()
+    if re.fullmatch(r"(?:[가-힣] )+[가-힣]", x):  # '조 강' -> '조강' (표에서 글자 사이를 띄운 이름)
+        x = x.replace(" ", "")
     x = re.sub(r"\([^)]*[:：][^)]*\)", "", x).strip()  # '(국내: …)' 같은 소재지 설명
     if len(x) > 24 and "," in x:
         parts = [t.strip() for t in x.split(",") if t.strip()]
