@@ -205,6 +205,11 @@ def main():
     found, missing = cp.resolve(corps, ["삼성전자", "SK하이닉스", "LG전자", "삼성전기"])
     call = lambda url, params: dc.call_dart(session, url, params)
     fetch = lambda api, code, y, r: pt.fetch_api(call, cache, key, api, code, y, r)
+    for _, c in found[:2]:  # 직원 현황 원자료 (합계 줄 모양 확인용)
+        jo = fetch("empSttus", c["corp_code"], 2025, "11011")
+        print("  empSttus", c["corp_name"])
+        for r in pt.dart_rows(jo, ["sm"])[:30]:
+            print("     ", {k: r.get(k) for k in ("fo_bbm", "sexdstn", "rgllbr_co", "cnttk_co", "sm", "avrg_cnwk_sdytrn", "fyer_salary_totamt", "jan_salary_am")})
     rows = cp.collect(fetch, found, 2025, "11011")
     for r in rows:
         print("  ", r["name"], {k: cp.fmt(k, r.get(k)) for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div")}, r.get("top_pay_who"), r.get("error") or "")
