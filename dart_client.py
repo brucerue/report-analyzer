@@ -155,6 +155,11 @@ def periodic_reports(session, cache, api_key, corp_code, years=4, today=None):
     return cache.put(key, out)
 
 
+def _one_line_row(m):
+    row = re.sub(r"(?i)</?(P|BR|SPAN|TABLE-GROUP)\b[^>]*>", " ", m.group(0))
+    return re.sub(r"\s+", " ", row)
+
+
 def doc_text_from_zip(data):
     """DART 원본파일 zip -> 글. 표는 칸을 ' | ', 줄을 줄바꿈으로. 본문(가장 짧은 .xml 이름)이 맨 앞, 첨부는 빈 줄 뒤."""
     try:
@@ -174,6 +179,7 @@ def doc_text_from_zip(data):
         if text is None:
             continue
         text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
+        text = re.sub(r"(?is)<TR\b.*?</TR>", _one_line_row, text)  # 표 한 행 = 한 줄 (칸 사이 줄바꿈·문단 태그를 없앤다)
         text = re.sub(r"(?i)</(TD|TH|TE|TU)>", " | ", text)
         text = re.sub(r"(?i)</(TR|P|TITLE|TABLE|LIBRARY|SECTION-\d+|BR)\s*>|<BR\s*/?>", "\n", text)
         text = html.unescape(re.sub(r"<[^>]+>", " ", text))

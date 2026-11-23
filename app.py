@@ -12,7 +12,7 @@ import dart_client as dc
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 14:28"
+LAST_UPDATED = "2026.11.23 15:31"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 

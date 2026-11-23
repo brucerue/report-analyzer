@@ -155,7 +155,7 @@ def note_span(lines, start, end, name_pat):
         s = lines[i].strip()
         if not is_heading_line(s):
             continue
-        m = re.match(r"^(\d{1,2})\s*\.\s*(?:" + name_pat + r").*$", s)
+        m = re.match(r"^(\d{1,2})\s*\.\s*(?:[^.|]{0,12}?)(?:" + name_pat + r").*$", s)  # '충당부채와 우발부채'처럼 앞에 낱말이 붙어도
         if m:
             found.append((i, int(m.group(1)), "(연결)" in s))
     if not found:

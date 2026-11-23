@@ -66,8 +66,8 @@ def show(name, row, parsed, summary):
     for b in SAMPLE_BLOCKS:
         if b in parsed["blocks"]:
             text = rp.block_text(parsed, b, numbered=True, cap=10 ** 7).split("\n")
-            print(f"--- 샘플 {b} (앞 30줄) ---")
-            for line in text[:30]:
+            print(f"--- 샘플 {b} (앞 15줄) ---")
+            for line in text[:15]:
                 print("   ", line[:180])
 
 
@@ -117,9 +117,11 @@ def main():
     for p in problems:
         print("문제:", p)
 
+    exp = {n: {"corp": r["corp"], "rcept_no": r["rcept_no"], "mains": sorted(r["mains"]), "blocks": sorted(r["blocks"])} for n, r in results.items()}
+    print("\n기대값 후보(JSON):")
+    print(json.dumps(exp, ensure_ascii=False))
     if "--write" in sys.argv:
         os.makedirs(os.path.dirname(EXPECTED), exist_ok=True)
-        exp = {n: {"corp": r["corp"], "rcept_no": r["rcept_no"], "mains": sorted(r["mains"]), "blocks": sorted(r["blocks"])} for n, r in results.items()}
         with open(EXPECTED, "w", encoding="utf-8") as f:
             json.dump(exp, f, ensure_ascii=False, indent=1)
         print("기대값 저장:", EXPECTED)

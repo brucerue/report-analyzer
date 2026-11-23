@@ -122,11 +122,11 @@ def test_report_names():
 def test_zip_and_list():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("20260310000001.xml", "<TITLE>II. 사업의 내용</TITLE><P>본문</P><TABLE><TR><TD>가동률</TD><TD>47.2</TD></TR></TABLE>")
+        z.writestr("20260310000001.xml", "<TITLE>II. 사업의 내용</TITLE><P>본문</P><TABLE><TR>\n<TD>가동률</TD>\n<TD><P>47.2</P></TD>\n</TR>\n<TR><TD>합계</TD><TD>1</TD></TR></TABLE>")
         z.writestr("20260310000001_00760.xml", "<P>첨부 감사보고서</P>")
     text = dc.doc_text_from_zip(buf.getvalue())
     check(text.index("본문") < text.index("첨부"), "본문 파일이 맨 앞")
-    check("가동률 | 47.2 |" in text, "표 칸은 ' | '로")
+    check("가동률 | 47.2 |" in text.replace("  ", " ") and "\n합계 | 1 |" in text, "표 한 행은 한 줄, 칸은 ' | '로 (칸 사이 줄바꿈·문단 태그 무시)")
 
     class Res:
         def __init__(self, jo):
