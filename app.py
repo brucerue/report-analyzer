@@ -14,7 +14,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 15:56"
+LAST_UPDATED = "2026.11.23 16:18"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 

@@ -61,7 +61,14 @@ def probe(parsed):
     dump("시설투자", "biz_plant", r"투자", after=6, limit=25)
     dump("지역", "biz_sales", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=30)
     dump("부문 정보 지역", "note_segment", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=25)
-    dump("출자 표 머리", "detail_invest", r"법인명|단위", after=4, limit=14)
+    from collections import Counter
+    rows = [(no, pt.cells(t)) for no, t in pt.block_lines(parsed, "detail_invest") if "|" in t]
+    print("--- 맛보기 출자 표 칸 수 ---")
+    print("      " + str(Counter(len(c) for _, c in rows).most_common(8)))
+    moved = [(no, c) for no, c in rows if len(c) >= 12 and any(x not in ("-", "", "0") for x in c[8:11])]
+    print(f"--- 맛보기 출자 표 증감 칸이 빈칸 아닌 행 ({len(moved)}개 중 앞 10개) ---")
+    for no, c in moved[:10]:
+        print(f"      {no}: [{len(c)}칸] " + " | ".join(c)[:220])
 
 
 def show_plant(parsed, row, rows_all, session, cache, key):

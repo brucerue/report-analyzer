@@ -44,6 +44,8 @@ def won_text(v):
     if v is None:
         return "-"
     sign, v = ("-" if v < 0 else ""), abs(v)
+    if v >= 1e10:  # 100억원 이상은 억 단위로 반올림 (기사 표기)
+        v = round(v / 1e8) * 1e8
     jo, eok, man = int(v // 1e12), int(v % 1e12 // 1e8), int(v % 1e8 // 1e4)
     if jo:
         return f"{sign}{jo:,}조" + (f"{eok}억원" if eok else "원")
@@ -223,12 +225,66 @@ def plant_lines(parsed, limit=10):
     return out[:limit]
 
 
-def find_lines(parsed, blocks, pattern, limit=8):
-    """블록들에서 pattern이 있고 숫자가 든 줄 -> [(줄 번호, 글)]."""
+PERIOD_NOW = ("당기", "당반기", "당분기", "당기말")
+PERIOD_PREV = ("전기", "전반기", "전분기", "전기말")
+
+
+def region_sales(parsed):
+    """재무 주석 '지역에 대한 공시' 표 -> dict(unit, now=[(지역, 금액)], prev=[...], line_now, line_prev) 또는 None.
+    머리글이 여러 줄로 겹친 표(삼성전자·현대차 확인):
+        | 국내 | 외국 |                                  <- 둘째 줄: 맨 앞 칸(국내·본사 소재지 국가)만 값이 있음
+        | 미주 | 유럽 | 아시아 및 아프리카 | 중국 |          <- 마지막 줄: 외국의 세부 지역
+        순매출액 | 46,641,151 | 133,274,793 | ... | 333,605,938 |   <- 마지막 값은 합계
+    자산(비유동자산) 표는 건너뛴다."""
+    lines = block_lines(parsed, "note_segment")
+    out, i = {}, 0
+    in_region, unit, period = False, None, None
+    heads = []
+    while i < len(lines):
+        no, t = lines[i]
+        flat = re.sub(r"\s+", "", t)
+        if "지역" in flat and "공시" in flat:
+            in_region = "자산" not in flat
+            heads, period = [], None
+        elif in_region:
+            c = cells(t)
+            first = re.sub(r"\s+", "", c[0]) if c else ""
+            if first in PERIOD_NOW + PERIOD_PREV:
+                period = "now" if first in PERIOD_NOW else "prev"
+                unit = unit_of(t)[0] or unit
+                heads = []
+            elif t.lstrip().startswith("|") and period:
+                heads.append([x for x in c if x])
+            elif period and c and "매출" in first and len(c) > 2:
+                vals = [to_num(x) for x in c[1:]]
+                if heads and all(v is not None for v in vals):
+                    leaf = heads[-1]
+                    upper = heads[-2] if len(heads) >= 2 else []
+                    names = None
+                    if len(vals) == len(leaf) + 2 and upper:
+                        names = [upper[0]] + leaf + ["합계"]
+                    elif len(vals) == len(leaf) + 1:
+                        names = leaf + ["합계"]
+                    elif len(vals) == len(leaf):
+                        names = leaf
+                    if names and period not in out:
+                        names = ["국내" if re.search(r"본사|국내", n) else n for n in names]
+                        out[period] = list(zip(names, vals))
+                        out["line_" + period] = no
+                period = None
+        i += 1
+    if "now" not in out:
+        return None
+    out["unit"] = unit or "백만원"
+    return out
+
+
+def find_lines(parsed, blocks, pattern, limit=8, table_only=True):
+    """블록들에서 pattern이 있고 숫자가 든 줄 -> [(줄 번호, 글)]. table_only면 표 줄('|')만 (판매경로 같은 긴 설명 문장을 뺀다)."""
     out = []
     for b in blocks:
         for no, t in block_lines(parsed, b):
-            if re.search(pattern, t) and re.search(r"\d", t):
+            if re.search(pattern, t) and re.search(r"\d", t) and (not table_only or "|" in t):
                 out.append((no, t[:220]))
                 if len(out) >= limit:
                     return out
@@ -514,9 +570,26 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         out.append(card("rnd", "연구개발비 / 매출액", note=note8, value=f"{ratio[0]}%" if ratio else None, prev=(f"전기 {ratio[1]}%" if reprt == "11011" else f"직전 사업연도 {ratio[1]}%") if ratio and ratio[1] is not None else None,
                         change=change_text(ratio[0], ratio[1], pct=False) if ratio and ratio[1] is not None else None,
                         rows=rows8, lines=[ratio[2]] if ratio else [], source=rp.REPORT_BLOCK_LABELS["biz_rnd"]))
-    # 9) 지역별 매출 (계산 안 함)
-    hits = find_lines(parsed, ["biz_sales", "note_segment"], r"미주|미국|북미|유럽|중국|아시아|인도|중남미|중동|아프리카|일본", limit=8)
-    if len(hits) < 3:
+    # 9) 지역별 매출: 재무 주석 '지역에 대한 공시' 표 (당기·전기 같은 기간), 없으면 원문 줄
+    reg = region_sales(parsed)
+    if reg:
+        now = dict(reg["now"])
+        prev = dict(reg.get("prev") or [])
+        tot = now.get("합계") or sum(v for k, v in reg["now"] if k != "합계")
+        rows9 = []
+        for name, v in reg["now"]:
+            if name == "합계":
+                continue
+            share = f"비중 {v / tot * 100:.1f}%" if tot else ""
+            p0 = prev.get(name)
+            chg = f", {'전기' if reprt == '11011' else '1년 전 같은 기간'} 대비 {change_text(v, p0)}" if p0 else ""
+            rows9.append((name, f"{money_text(v, reg['unit'])} · {share}{chg}", reg["line_now"]))
+        top = max((x for x in reg["now"] if x[0] != "합계"), key=lambda x: x[1])
+        out.append(card("region", "지역별 매출 (연결)", value=f"{top[0]} {top[1] / tot * 100:.1f}%" if tot else top[0],
+                        rows=rows9, note="합계 " + money_text(tot, reg["unit"]) + ". 비중이 가장 큰 지역을 위에 적었어요.",
+                        source="재무 주석 > 부문 정보 > 지역에 대한 공시"))
+    hits = [] if reg else find_lines(parsed, ["biz_sales", "note_segment"], r"미주|미국|북미|유럽|중국|아시아|인도|중남미|중동|아프리카|일본", limit=8)
+    if not reg and len(hits) < 3:
         more = find_lines(parsed, ["biz_sales", "note_segment"], r"국내|내수|수출|해외", limit=8)
         hits += [h for h in more if h not in hits][:8 - len(hits)]
     if hits:

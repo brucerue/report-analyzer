@@ -53,7 +53,7 @@ def check(cond, msg):
 
 def test_numbers():
     check(pt.to_num("(4,519)") == -4519 and pt.to_num("△1,234") == -1234 and pt.to_num("2.5%") == 2.5 and pt.to_num("-") is None, "숫자 읽기")
-    check(pt.won_text(371_799 * 1e6) == "3,717억원" and pt.won_text(1.6144e12) == "1조6144억원" and pt.won_text(158_000_000) == "1억5800만원", "기사체 금액")
+    check(pt.won_text(371_799 * 1e6) == "3,718억원" and pt.won_text(133_274_793 * 1e6) == "133조2748억원" and pt.won_text(1.6144e12) == "1조6144억원" and pt.won_text(158_000_000) == "1억5800만원", "기사체 금액")
     check(pt.unit_of("(기준일 : | 2025년 | ) | (단위 : 백만원, 천주, %) |") == ("백만원", "천주"), "단위 읽기")
 
 
@@ -84,6 +84,47 @@ def test_rnd_plant_region():
     check(pt.change_text(30.67, 30.67, pct=False) == "변동 없음", "변동 없음")
     check(cards["plant"]["rows"][0][1] == "(3) 가동률" and any("86.2" in r[1] and r[2] for r in cards["plant"]["rows"]), "가동률 제목 줄과 그 아래 표 줄 (계산 없이)")
     check(any("미주" in r[1] for r in cards["region"]["rows"]), "지역별 매출 원문 줄")
+
+
+SEG = """II. 사업의 내용
+4. 매출 및 수주상황
+매출 | 1 |
+III. 재무에 관한 사항
+5. 재무제표 주석
+30. 부문별 보고 (연결)
+|
+순매출액의 지역별 공시 |
+당기 | (단위 : 백만원) |
+| 지역 | 지역 합계 |
+| 국내 | 외국 |
+| 미주 | 유럽 | 아시아 및 아프리카 | 중국 |
+순매출액 | 46,641,151 | 133,274,793 | 53,327,193 | 53,047,987 | 47,314,814 | 333,605,938 |
+|
+전기 | (단위 : 백만원) |
+| 지역 | 지역 합계 |
+| 국내 | 외국 |
+| 미주 | 유럽 | 아시아 및 아프리카 | 중국 |
+순매출액 | 39,826,088 | 118,828,546 | 50,118,754 | 48,171,377 | 43,926,138 | 300,870,903 |
+|
+비유동자산의 지역별 공시 |
+당기 | (단위 : 백만원) |
+| 국내 | 외국 |
+| 미주 | 유럽 | 아시아 및 아프리카 | 중국 |
+비유동자산 | 182,111,025 | 32,989,995 | 7,614,552 | 9,884,452 | 9,850,058 | 242,450,082 |
+31. 법인세
+x | 1 |
+"""
+
+
+def test_region():
+    p = rp.parse_report(SEG)
+    r = pt.region_sales(p)
+    check([n for n, _ in r["now"]] == ["국내", "미주", "유럽", "아시아 및 아프리카", "중국", "합계"] and r["unit"] == "백만원", "겹친 머리글 풀기 (삼성전자 모양)")
+    check(dict(r["prev"])["미주"] == 118828546 and "순매출액" in p["lines"][r["line_now"] - 1], "전기 값과 줄 번호, 자산 표는 건너뜀")
+    hy = SEG.replace("당기 |", "당반기 |").replace("전기 |", "전반기 |").replace("| 국내 | 외국 |", "| 본사 소재지 국가 | 외국 |").replace("순매출액", "매출액")
+    check(pt.region_sales(rp.parse_report(hy))["now"][0][0] == "국내", "현대차 모양 (당반기·본사 소재지 국가)")
+    c = {x["key"]: x for x in pt.build_cards(p, None, None)}["region"]
+    check(c["value"] == "미주 39.9%" and any(r[0] == "미주" and "133조2748억원" in r[1] and "12.2% 증가" in r[1] for r in c["rows"]), "지역별 매출 카드 (비중·전기 대비)")
 
 
 def test_api_cards():
