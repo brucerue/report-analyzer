@@ -79,6 +79,8 @@ def test_invest_and_consol():
 def test_invest_none():
     text = REPORT.replace("{x}", "").split("삼성전기㈜")[0] + "국민은행 | 비상장 | 2008.09.29 | 설립시 주식이전 | 12,227,020 | 404,379,116 | 100 | 14,821,721 | - | - | - | 404,379,116 | 100 | 14,821,721 | 584,934,967 | 3,852,166 |\n"
     c = {x["key"]: x for x in pt.build_cards(rp.parse_report(text), None, None)}["invest"]
+    q = {x["key"]: x for x in pt.build_cards(rp.parse_report(text.split("국민은행")[0].split("법인명 |")[0] + "기재 생략\n"), None, None, reprt="11014")}["invest"]
+    check(q["empty"].startswith("이 보고서엔 타법인출자 상세표가 실려 있지 않아요"), "분기보고서 상세표 생략 안내")
     check(c["empty"].startswith("출자 1곳을 확인했는데, 이번 기간에 취득·처분한 곳은 없어요"), "취득·처분이 없으면 확인한 곳 수와 함께 (KB금융 2025)")
 
 

@@ -460,8 +460,13 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
                         rows=lines, source=f"{rp.REPORT_BLOCK_LABELS['detail_invest']} · 단위 {money or '?'}"))
     elif "detail_invest" in parsed["blocks"]:
         n = getattr(invest_changes, "seen", 0)
-        msg = (f"출자 {n}곳을 확인했는데, 이번 기간에 취득·처분한 곳은 없어요 (평가손익만 바뀐 곳은 뺐어요)." if n
-               else "타법인출자 표의 모양을 읽지 못했어요. '목차별 보기 > XII. 상세표'에서 원문을 확인하세요.")
+        raw = " ".join(t for _, t in block_lines(parsed, "detail_invest"))
+        if n:
+            msg = f"출자 {n}곳을 확인했는데, 이번 기간에 취득·처분한 곳은 없어요 (평가손익만 바뀐 곳은 뺐어요)."
+        elif reprt in ("11013", "11014") or "생략" in raw or "|" not in raw:
+            msg = "이 보고서엔 타법인출자 상세표가 실려 있지 않아요 (분기보고서는 생략하는 경우가 많아요). 반기·사업보고서에서 확인하세요."
+        else:
+            msg = "타법인출자 표의 모양을 읽지 못했어요. '목차별 보기 > XII. 상세표'에서 원문을 확인하세요."
         out.append(card("invest", "타법인 출자 변동", empty=msg))
 
     # 2) 종속회사
