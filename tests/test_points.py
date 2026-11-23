@@ -186,11 +186,24 @@ x | 1 |
 def test_material_and_fin():
     m = pt.material_table(rp.parse_report(MAT))
     check(m["total"] == 745693 + 174432 and m["unit"] == "억원" and m["line_total"] is None, "삼성전자 모양: 합계 줄이 없으면 부문 소계를 더함")
-    check(m["items"][0][0] == "모바일AP 솔루션 · CPU" and m["items"][0][2] == 18.5 and all("기타" not in i[0] for i in m["items"]), "품목 큰 순, '기타' 뺌")
+    check(m["items"][0][0] == "DX 부문 · 모바일AP 솔루션 · CPU" and m["items"][0][2] == 18.5 and all("기타" not in i[0] for i in m["items"]), "품목 큰 순, '기타' 뺌")
     eco = MAT.replace("부 문 | 품 목 | 구체적 용도 | 매입액 | 비중 | 주요 매입처 |", "품 목 | 구체적 용도 | 매입액 | 비율 |").replace("(단위 : 억원, %) |", "(기준일 : 2025년 12월 31일) | (단위 : 백만원) |")
     eco = eco.split("DX 부문")[0] + "전구체,리튬 등 | 양극활물질 제조 소재 | 1,906,841 | 98.8% |\n기타 | - | 23,412 | 1.2% |\n합계 | 1,930,253 | 100% |\n4. 매출 및 수주상황\nx | 1 |\nIII. 재무에 관한 사항\n1. 요약재무정보\nx | 1 |\n"
     e = pt.material_table(rp.parse_report(eco))
     check(e["total"] == 1930253 and e["unit"] == "백만원" and e["line_total"] and e["items"][0][1] == 1906841, "에코프로비엠 모양: 합계 줄")
+    hy = MAT.split("부 문 |")[0] + """부문 | 구분 | 매입유형 | 주요품목 | 매입액 | 비율(%) | 비고 |
+차량부문 | 국내공장(HMC) | 부품 | 모듈/시트外 | 203,216 | 44.5 | 현대모비스外 |
+미국공장(HMMA) | 부품 | 모듈/시트外 | 71,287 | 15.6 | 현대모비스外 |
+계 | 부품 | 404,013 | 88.4 | |
+합 계 | 457,030 | 100.0 | |
+4. 매출 및 수주상황
+x | 1 |
+III. 재무에 관한 사항
+1. 요약재무정보
+x | 1 |
+"""
+    h = pt.material_table(rp.parse_report(hy))
+    check(h["total"] == 457030 and [i[0] for i in h["items"]] == ["국내공장(HMC) · 부품 · 모듈/시트外", "미국공장(HMMA) · 부품 · 모듈/시트外"], "현대차 모양: 중간 '계' 줄 빼고 공장 이름 붙임")
     plan = pt.invest_plan_lines(rp.parse_report(MAT))
     check(any("41,502" in t for _, t in plan) and any("105,267" in t for _, t in plan), "투자 계획·실적 표 줄 (계산 안 함)")
     fin_rows = [
@@ -210,6 +223,8 @@ def test_material_and_fin():
     check(cards["debt"]["value"] == "부채비율 50.0%" and cards["debt"]["change"] == "5%p 상승", "부채비율 카드 (전기말 대비)")
     check(cards["capex"]["value"] == "4조원" and cards["capex"]["change"] == "20.0% 감소" and any("105,267" in r[1] for r in cards["capex"]["rows"]), "시설투자 카드 (유형자산 취득 + 원문 계획 줄)")
     check(cards["material"]["value"] == "92조125억원", "원재료 매입액 카드 (억원 단위 표)")
+    bank = rp.parse_report(MAT.replace("3. 원재료 및 생산설비", "1. 영업의 현황"))
+    check("debt" not in {c["key"] for c in pt.build_cards(bank, None, None, fin_api=lambda: fin)}, "금융업은 부채비율 카드 뺌")
 
 
 def test_api_cards():

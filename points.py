@@ -542,12 +542,15 @@ def material_table(parsed):
         flat = re.sub(r"\s+", "", " ".join(texts))
         amount = nums[0][1]
         share = nums[1][1] if len(nums) > 1 and nums[1][1] is not None and nums[1][1] <= 100 else None
+        first = re.sub(r"\s+", "", texts[0]) if texts else ""
         if any(w in flat for w in ("합계", "총계")):
             total, line_total = amount, no
         elif "소계" in flat:
             subtotal.append(amount)
+        elif first == "계":
+            continue  # 현대차 '계 | 부품 | …' 같은 중간 합계 줄
         elif texts and not re.fullmatch(r"기타", texts[-1]):
-            items.append((" · ".join(texts[-2:]) if len(texts) > 1 else texts[0], amount, share, no))
+            items.append((" · ".join(texts[-3:]), amount, share, no))  # 공장·유형·품목 (현대차) / 부문·품목·용도 (삼성전자)
     if total is None and subtotal:
         total = sum(subtotal)
     if total is None and not items:
@@ -735,7 +738,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None):
                         prev=f"1년 전 같은 기간 {money_text(pm['total'], pm['unit'])}" if pm and pm["total"] else None,
                         change=change_text(mat["total"], pm["total"]) if pm and pm["total"] and pm["unit"] == mat["unit"] else None,
                         rows=rows_m, lines=[mat["line_total"]] if mat["line_total"] else [],
-                        note=None if mat["line_total"] else "합계 줄이 없어 부문 소계를 더했어요.", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표"))
+                        note=("합계 줄이 없어 부문 소계를 더했어요. " if not mat["line_total"] else "") + "비중은 표에 적힌 값이에요(부문 안 비중일 수 있어요).", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표"))
 
     # 7-3) 시설투자: 현금흐름표 '유형자산의 취득'(DART 재무제표) + 원문 투자 계획 줄
     fin = fin_api() if fin_api else None
@@ -751,10 +754,12 @@ def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None):
                             rows=rows7, note=("현금흐름표 금액이에요" + ("" if reprt == "11011" else " (그해 초부터 누적)") + "."
                                   + (" 아래 줄은 원문의 투자 계획·실적 표(계산 안 함)." if plan else "")),
                             source=f"DART 재무제표({fin['fs']}) · 현금흐름표 + " + rp.REPORT_BLOCK_LABELS["biz_plant"]))
-        # 부채·차입·현금
-        if f1["liab"] is not None and f1["equity"]:
+        # 부채·차입·현금 (은행·보험·지주 같은 금융업은 예금·보험부채 때문에 부채비율이 의미 없어 뺀다)
+        financial = "biz_fin_ops" in parsed["blocks"] and "biz_plant" not in parsed["blocks"]
+        if f1["liab"] is not None and f1["equity"] and not financial:
             rows_d = [("부채총계", won_text(f1["liab"]), None), ("차입금(사채 포함)", won_text(f1["borrow"]) + (f" (전기말 {won_text(f0['borrow'])})" if f0["borrow"] else ""), None),
                       ("현금및현금성자산", won_text(f1["cash"]) + (f" (전기말 {won_text(f0['cash'])})" if f0["cash"] else ""), None)]
+            rows_d = [r for r in rows_d if not r[1].startswith("-")]
             if f1["net_borrow"] is not None:
                 rows_d.append(("순차입금(차입금-현금)", won_text(f1["net_borrow"]) if f1["net_borrow"] >= 0 else "순현금 " + won_text(-f1["net_borrow"]), None))
             out.append(card("debt", "부채비율·차입금·현금", value=f"부채비율 {f1['debt_ratio']:.1f}%",
