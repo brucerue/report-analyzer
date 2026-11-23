@@ -1,6 +1,6 @@
 # 사업보고서 분석기 — 작업 규칙 (Claude Code용)
 
-중앙일보 나상현 기자의 Streamlit 앱. 사업·반기·분기보고서(DART 정기보고서)를 목차 부분별로 깊게 읽는다.
+중앙일보 나상현 기자의 Streamlit 앱(https://report-analyzer.streamlit.app, Streamlit Community Cloud · main 브랜치 app.py). 사업·반기·분기보고서(DART 정기보고서)를 목차 부분별로 깊게 읽는다.
 산업 취재 도우미(공개 저장소 `brucerue/DART-Joongang`)에서 갈라져 나왔다. 사용자는 한국어, 짧고 친절한 설명과 단계별 안내를 좋아함.
 
 ## 반드시 지킬 것

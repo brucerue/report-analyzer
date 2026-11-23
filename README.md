@@ -1,5 +1,7 @@
 # 사업보고서 분석기
 
+앱 주소: https://report-analyzer.streamlit.app
+
 DART 사업·반기·분기보고서를 목차 부분별로 나눠 읽는 Streamlit 앱입니다.
 
 - 목차별 원문 (원문 줄 번호 표시)
