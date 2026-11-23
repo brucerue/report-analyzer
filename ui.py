@@ -76,6 +76,16 @@ html, body, [data-testid="stAppViewContainer"], .stApp{ background:var(--paper);
 .ra-card .foot{ font-size:.78rem; color:var(--ink-soft); margin:.4rem 0 0; }
 .ra-card .empty{ color:var(--ink-soft); font-size:.9rem; margin:0; }
 
+/* 공장별 표 */
+.ra-table{ width:100%; border-collapse:collapse; background:var(--sheet); border:1px solid var(--rule); font-size:.9rem; margin:.4rem 0 .8rem; }
+.ra-table th{ text-align:right; font-weight:600; color:var(--ink-soft); padding:.5rem .7rem; border-bottom:1px solid var(--ink); white-space:nowrap; }
+.ra-table th:first-child, .ra-table td:first-child{ text-align:left; }
+.ra-table td{ text-align:right; padding:.45rem .7rem; border-bottom:1px solid #E6EBE9; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.ra-table tr.sum td{ font-weight:600; background:#F7F9F8; }
+.ra-table td.down{ color:var(--red); }
+.ra-table td.ln{ color:#8A979C; font-size:.78rem; }
+.ra-wrap{ overflow-x:auto; }
+
 /* AI 답의 근거 표시 */
 .ra-cite{ font-size:.78rem; color:var(--seal); border:1px solid #B9C6E4; background:#F1F4FB; padding:.05rem .4rem;
   white-space:nowrap; border-radius:2px; }
@@ -226,3 +236,25 @@ def cards(items):
                 body.append(f'<p class="foot">{"<br>".join(esc(f) for f in foot)}</p>')
         html_cards.append(f'<article class="ra-card">{"".join(body)}</article>')
     st.html(f'<div class="ra-cards">{"".join(html_cards)}</div>')
+
+
+def plant_table(st_set):
+    """plant.compare의 합산 묶음 하나 -> 공장별 표 (합산 줄 먼저)."""
+    import plant
+    u = st_set["unit"]
+    head = ["거점", "생산능력", "생산실적", "가동률", "1년 전", "변화", "원문"]
+    body = []
+    for name, now, prev in (("합산", st_set["same"] or st_set["now"], st_set["prev"]), ("국내", st_set["now_dom"], st_set["prev_dom"]),
+                            ("해외", st_set["now_abr"], st_set["prev_abr"])):
+        if not now or (name != "합산" and not prev):
+            continue
+        d = now["rate"] - prev["rate"] if prev and prev["rate"] is not None else None
+        body.append(f'<tr class="sum"><td>{name} {now["n"]}곳</td><td>{now["cap"]:,}</td><td>{now["prod"]:,}</td><td>{plant.pct(now["rate"])}</td>'
+                    f'<td>{plant.pct(prev["rate"]) if prev else "-"}</td><td class="{"down" if d is not None and d < 0 else ""}">{plant.pp(d)}</td><td></td></tr>')
+    for r in sorted(st_set["rows"], key=lambda r: (r["diff"] is None, r["diff"] or 0)):
+        d = r["diff"]
+        body.append(f'<tr><td>{esc(plant.label(r))}</td><td>{r["cap"]:,}</td><td>{r["prod"]:,}</td><td>{plant.pct(r["rate"])}</td>'
+                    f'<td>{plant.pct(r["prev_rate"])}</td><td class="{"down" if d is not None and d < 0 else ""}">{plant.pp(d)}</td><td class="ln">줄 {r["line"]:,}</td></tr>')
+    th = "".join(f"<th>{h}</th>" for h in head)
+    st.html(f'<div class="ra-wrap"><table class="ra-table"><caption style="caption-side:top;text-align:left;padding:.3rem 0;color:#56646A;font-size:.85rem">'
+            f'{esc(st_set["label"])} · 단위 {esc(u)} · 하락 폭 큰 순</caption><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table></div>')

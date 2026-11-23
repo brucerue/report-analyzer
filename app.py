@@ -9,11 +9,12 @@ import streamlit as st
 
 import analyses as an
 import dart_client as dc
+import plant
 import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 15:41"
+LAST_UPDATED = "2026.11.23 15:52"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -59,6 +60,17 @@ def get_parsed(rcept_no):
 def filed_on(r):
     d = str(r.get("rcept_dt", ""))
     return f"{d[:4]}.{d[4:6]}.{d[6:8]}" if len(d) == 8 else d
+
+
+def period_phrase(r):
+    """보고서 -> 기사 기간 표현: 사업 '2025년', 반기 '2026년 상반기', 1분기 '2026년 1분기', 3분기 '2026년 1∼9월'."""
+    per, kind = dc.report_period_of(r.get("report_nm")), dc.report_kind_of(r.get("report_nm"))
+    if not per:
+        return "이번 기간"
+    y, m = per
+    if "사업" in kind:
+        return f"{y}년"
+    return {6: f"{y}년 상반기", 3: f"{y}년 1분기", 9: f"{y}년 1∼9월"}.get(m, f"{y}년 {m}월까지")
 
 
 def date_label(r):
@@ -156,6 +168,16 @@ with tab_point:
                 ui.sheet(ui.around_rows(parsed["lines"], set(cite[:40]), width=2))
     else:
         st.info("이 보고서에서 카드로 만들 숫자를 찾지 못했어요. '목차별 보기'에서 원문을 확인해 주세요.")
+    pres = plant.compare(parsed, prev_parsed)
+    if pres["sets"]:
+        st.markdown("#### 공장별 가동률")
+        ui.note("보고서의 '생산능력 | 생산실적 | 가동률' 표를 읽었어요. 1년 전은 같은 기간 보고서의 같은 공장끼리 비교해요.")
+        for one in pres["sets"]:
+            ui.plant_table(one)
+            lines = plant.sentences(one, period_phrase(row))
+            if lines:
+                ui.note("기사용 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
+                st.code("\n".join(lines), language=None, wrap_lines=True)
     found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
     missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
     with st.expander(f"이 보고서에서 찾은 부분 {len(found)}개 (원문 전체 {len(parsed['lines']):,}줄)"):

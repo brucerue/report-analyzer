@@ -478,8 +478,23 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
             out.append(card("return", "자사주·배당", value=(f"소각 {t1['burn']:,}주" if t1 and t1["burn"] else None), rows=rows6,
                             source="DART 정기보고서 주요정보 · 자기주식·배당", lines=[rp.block_first_line(parsed, "co_shares")]))
 
-    # 7) 가동률 (계산 안 함)
-    hits = plant_lines(parsed)
+    # 7) 가동률: '능력 | 실적 | 가동률%' 표가 있으면 공장별 계산(plant.py), 없으면 원문 줄만
+    import plant
+    pres = plant.compare(parsed, prev_parsed)
+    main = max(pres["sets"], key=lambda x: x["now"]["cap"] if x["unit"] in ("대", "천대") else 0, default=None) if pres["sets"] else None
+    hits = plant_lines(parsed) if not main else []
+    if main:
+        now = main["same"] or main["now"]
+        ranked = sorted(main["rows"], key=lambda r: (r["diff"] is None, r["diff"] if r["diff"] is not None else 0))
+        rows7 = []
+        for r in ranked[:6]:
+            before = f"{r['prev_rate']:.1f}% → " if r["prev_rate"] is not None else ""
+            rows7.append((plant.label(r), f"{before}{r['rate']:.1f}%" + (f" ({plant.pp(r['diff'])})" if r["diff"] is not None else ""), r["line"]))
+        out.append(card("plant", f"가동률 · {main['label']}", value=f"{now['rate']:.1f}%",
+                        prev=f"1년 전 같은 기간 {main['prev']['rate']:.1f}%" if main["prev"] else None,
+                        change=plant.pp(now["rate"] - main["prev"]["rate"]) if main["prev"] else None, rows=rows7,
+                        note=f"{now['n']}곳 합산 = 생산실적 합 ÷ 생산능력 합 (단위 {main['unit']}). 공장별은 보고서에 적힌 가동률. 하락 폭 큰 순.",
+                        source=rp.REPORT_BLOCK_LABELS["biz_plant"]))
     if hits:
         out.append(card("plant", "가동률 (원문 줄)", rows=[("", t, no) for no, t in hits],
                         note="회사마다 표 모양이 달라 계산하지 않고 원문 줄을 그대로 보여 줘요.", source=rp.REPORT_BLOCK_LABELS["biz_plant"]))

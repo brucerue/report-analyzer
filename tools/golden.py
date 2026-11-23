@@ -15,6 +15,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import dart_client as dc
+import plant
 import points as pt
 import report_parse as rp
 
@@ -26,6 +27,7 @@ CASES = [
     ("금융업", "KB금융", "사업보고서", None),
     ("코스닥", "에코프로비엠", "사업보고서", None),
     ("반기", "현대자동차", "반기보고서", None),
+    ("분기", "현대자동차", "분기보고서", (2026, 9)),  # 2026.11.17 연합뉴스 '현대차 공장 가동률 94→86%' 기사가 쓴 보고서
 ]
 CORRECTION_POOL = ["삼성전자", "현대자동차", "KB금융", "에코프로비엠", "LG에너지솔루션", "SK하이닉스", "POSCO홀딩스", "한국전력공사"]
 SAMPLE_BLOCKS = ["staff_people", "staff_pay", "holder", "co_shares", "detail_invest", "detail_consol", "biz_plant", "biz_sales", "biz_rnd"]
@@ -60,6 +62,19 @@ def probe(parsed):
     dump("지역", "biz_sales", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=30)
     dump("부문 정보 지역", "note_segment", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=25)
     dump("출자 표 머리", "detail_invest", r"법인명|단위", after=4, limit=14)
+
+
+def show_plant(parsed, row, rows_all, session, cache, key):
+    prev = dc.find_prev_periodic(dc.latest_versions(rows_all), row) if rows_all else None
+    prev_parsed = rp.parse_report(dc.report_text(session, cache, key, str(prev["rcept_no"]))) if prev else None
+    res = plant.compare(parsed, prev_parsed)
+    print(f"--- 공장별 가동률 (비교: {prev.get('report_nm') if prev else '없음'}) ---")
+    for one in res["sets"]:
+        print(f"  [{one['label']} · {one['unit']}] 합산 {plant.pct((one['same'] or one['now'])['rate'])} / 1년 전 {plant.pct(one['prev']['rate']) if one['prev'] else '-'}")
+        for r in one["rows"]:
+            print(f"      {plant.label(r)}: 능력 {r['cap']:,} 실적 {r['prod']:,} 가동률 {plant.pct(r['rate'])} (다시 계산 {plant.pct(r['calc'])}) 1년 전 {plant.pct(r['prev_rate'])} {plant.pp(r['diff'])} (줄 {r['line']})")
+        for line in plant.sentences(one, "올해"):
+            print("      >", line)
 
 
 def show_cards(parsed, corp_code, row, session, cache, key):
@@ -138,6 +153,8 @@ def main():
             show(name, row, parsed, s)
             c = dc.find_corps(corps, e["corp"], limit=1)
             show_cards(parsed, c[0]["corp_code"] if c else None, row, session, cache, key)
+            if c:
+                show_plant(parsed, row, dc.periodic_reports(session, cache, key, c[0]["corp_code"]), session, cache, key)
             if "--probe" in sys.argv:
                 probe(parsed)
             results[name] = {"corp": e["corp"], "report": e.get("report", ""), "rcept_no": e["rcept_no"], **s}
@@ -147,6 +164,7 @@ def main():
             problems.append(f"{name}: 회사 '{corp_name}' 못 찾음")
             return None
         rows = dc.periodic_reports(session, cache, key, c[0]["corp_code"])
+        all_rows = rows
         if need_correction:
             rows = [r for r in dc.latest_versions(rows) if r.get("versions", 1) > 1]
         row = pick(rows, kind, period) if not need_correction else (rows[0] if rows else None)
@@ -160,6 +178,8 @@ def main():
             return None
         s = summarize(parsed)
         show(name, row, parsed, s)
+        show_cards(parsed, c[0]["corp_code"], row, session, cache, key)
+        show_plant(parsed, row, all_rows, session, cache, key)
         results[name] = {"corp": c[0]["corp_name"], "report": row.get("report_nm"), "rcept_no": row.get("rcept_no"), **s}
         time.sleep(1)
         return row
