@@ -22,8 +22,18 @@ at.text_input[0].input("가나전지")
 at.button[0].click().run()
 assert not at.exception, at.exception
 assert any("사업보고서 (2025.12)" in str(o) for o in at.selectbox[0].options), "보고서 목록"
-codes = " ".join(c.value for c in at.code)
+codes = " ".join([m.value for m in at.markdown] + [str(h.proto) for h in at.get("html")])
 assert "자기주식" in codes, "목차별 보기 원문 (첫 목차 I. 회사의 개요)"
 assert "로봇용 배터리" in codes, "달라진 문장"
 assert any("GEMINI_API_KEY" in i.value for i in at.info), "Gemini 키 없을 때 안내"
+os.environ["GEMINI_API_KEY"] = "TEST"
+import analyses as an
+an.call_gemini = lambda *a, **k: "**한 줄 요약**: 가동률 47.2% [II-3. 원재료 및 생산설비 · 줄 16]"
+at = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "app.py"), default_timeout=30).run()
+at.text_input[0].input("가나전지")
+at.button[0].click().run()
+next(b for b in at.button if b.label == "분석하기").click().run()
+assert not at.exception, at.exception
+assert any("ra-answer" in m.value for m in at.markdown), "AI 답 보이기"
+print("ok - AI 분석 버튼까지 오류 없음 (가짜 AI 답)")
 print("ok - 화면이 오류 없이 끝까지 그려짐 (목록·목차별 원문·달라진 문장)")

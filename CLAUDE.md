@@ -9,7 +9,7 @@
 - 추가 비용이 드는 서비스는 쓰지 않는다. AI는 Gemini 무료 등급만(유료 Claude 대체 없음).
 - 요청하지 않은 변경은 하지 않는다.
 - 기능을 바꾸면 `app.py`의 `LAST_UPDATED`(한국시간)를 올리고, 같은 커밋에서 `업데이트_기록.md` 맨 위에 `시각 [추가/수정/삭제] 내용 · 바뀐 파일 · ▶할 일`을 적는다.
-- 바꾼 뒤엔 `python tests/test_core.py`, `python tests/test_app.py`(가짜 DART 응답). 실서버 접속이 안 되는 환경이면 솔직히 말한다.
+- 바꾼 뒤엔 `python tests/test_core.py`, `python tests/test_app.py`(가짜 DART 응답). 화면을 바꿨으면 `tests/fake_app.py`를 띄워 캡처로 확인. 실서버 접속이 안 되는 환경이면 솔직히 말한다.
 
 ## 원칙 (산업 취재 도우미에서 이어 옴)
 - 숫자는 AI가 만들지 않는다. AI 발췌에는 원문 줄 번호(`123: `)를 붙이고, 답에 나온 숫자가 발췌에 그대로 있는지 대조해 없으면 경고(`analyses.unverified_numbers`).
@@ -21,6 +21,8 @@
 - `report_parse.py`: 목차 나누기(I~XII는 제목 글자로, 목차 점선 줄 건너뜀, 같은 제목이면 뒤 글이 긴 쪽이 본문) · 소제목 · 재무 주석 · 줄 번호.
 - `dart_client.py`: OpenDART 호출, 원문 zip → 글, 보고서 목록(최근 4년), 1년 전·바로 앞 보고서 찾기, 기업 찾기(DART-Joongang `corp-codes` 브랜치 CSV).
 - `analyses.py`: AI 분석 항목(지면 기사 학습 빈도순), 발췌, 문장 비교, 숫자 대조, Gemini 호출.
+- `ui.py`: 화면 꾸미기 '교정지' — 종이 #F2F4F3 · 먹 #1F2B30 · 형광펜 #EEF36A(근거·새 문장) · 교정 빨강 #B8322A(없어진 문장) · 인주 청 #24479A. 원문은 괘선+줄 번호. HTML 조각은 `st.html`(스타일 포함), AI 답만 마크다운.
+- `tests/fake_app.py`: 가짜 DART·AI 응답으로 앱 띄우기 (`streamlit run tests/fake_app.py`) — 화면 확인용.
 - `app.py`: 화면 — 기사 포인트(2단계) / 목차별 보기 / AI 분석 / 달라진 문장 / 여러 회사 비교(4단계).
 
 ## 단계

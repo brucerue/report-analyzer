@@ -10,9 +10,11 @@ import streamlit as st
 import analyses as an
 import dart_client as dc
 import report_parse as rp
+import ui
 
-LAST_UPDATED = "2026.11.23 15:30"
+LAST_UPDATED = "2026.11.23 14:28"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
+ui.inject()
 
 
 def load_secret(name):
@@ -53,28 +55,18 @@ def get_parsed(rcept_no):
     return rp.parse_report(text)
 
 
-def date_label(r):
+def filed_on(r):
     d = str(r.get("rcept_dt", ""))
-    d = f"{d[:4]}.{d[4:6]}.{d[6:8]}" if len(d) == 8 else d
-    extra = f" · 정정 {r['versions'] - 1}회, 최신본" if r.get("versions", 1) > 1 else ""
-    return f"{dc.strip_correction(r.get('report_nm'))} — 제출 {d}{extra}"
+    return f"{d[:4]}.{d[4:6]}.{d[6:8]}" if len(d) == 8 else d
 
 
-def show_lines(parsed, around, width=3):
-    """원문 줄 번호 앞뒤를 보여 준다."""
-    lines = parsed["lines"]
-    rows = []
-    for n in around:
-        for k in range(max(1, n - width), min(len(lines), n + width) + 1):
-            mark = "▶" if k == n else " "
-            rows.append(f"{mark}{k}: {lines[k - 1].strip()}")
-        rows.append("")
-    st.code("\n".join(rows), language=None)
+def date_label(r):
+    extra = f", 정정 {r['versions'] - 1}회" if r.get("versions", 1) > 1 else ""
+    return f"{dc.strip_correction(r.get('report_nm'))}  (제출 {filed_on(r)}{extra})"
 
 
 # ------------------------------------------------------------
-st.title("사업보고서 분석기")
-st.caption(f"사업·반기·분기보고서를 목차 부분별로 읽어요 · 숫자는 반드시 원문으로 확인 · 업데이트 {LAST_UPDATED}")
+ui.masthead(LAST_UPDATED)
 
 if not DART_KEY:
     st.error("Streamlit Secrets에 DART_API_KEY를 넣어 주세요.")
@@ -117,7 +109,7 @@ if not rows:
 ri = st.selectbox("보고서", range(len(rows)), format_func=lambda i: date_label(rows[i]))
 row = rows[ri]
 rno = str(row["rcept_no"]).strip()
-st.markdown(f"[DART 원문 보기]({dc.DART_VIEW_URL.format(rno)})")
+ui.cover(corp, dc.strip_correction(row.get("report_nm")), filed_on(row), row.get("versions", 1), None, dc.DART_VIEW_URL.format(rno))
 
 try:
     with st.spinner("보고서 원문을 받아 목차별로 나누는 중... (처음 받는 보고서는 20~40초)"):
@@ -130,27 +122,25 @@ tab_point, tab_toc, tab_ai, tab_diff, tab_multi = st.tabs(["기사 포인트", "
 
 # ---------------- 기사 포인트 (2단계에서 숫자 카드로) ----------------
 with tab_point:
-    st.info("기사 포인트 카드(직전 대비 숫자 변화)는 다음 단계에서 만들어요. 지금은 이 보고서에서 찾은 부분을 보여 줘요.")
+    st.info("직전 대비 숫자 변화를 모은 기사 포인트 카드는 다음 단계에서 이 자리에 들어와요. 지금은 이 보고서에서 찾은 부분과 시작 줄을 보여 줘요.")
     found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
     missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
-    st.markdown("**찾은 부분** (시작 줄)")
-    st.write(" · ".join(f"{name} (줄 {n})" for name, n in found))
-    if missing:
-        st.caption("이 보고서에 없거나 '해당사항 없음'인 부분: " + ", ".join(missing))
+    ui.note(f"이 보고서에서 찾은 부분 {len(found)}개와 시작 줄 (원문 전체 {len(parsed['lines']):,}줄)")
+    ui.parts_list(found, missing)
 
 # ---------------- 목차별 보기 ----------------
 with tab_toc:
     keys = [k for k, _ in rp.REPORT_MAIN_SECTIONS if k in parsed["mains"]]
     mk = st.selectbox("목차", keys, format_func=lambda k: rp.MAIN_LABELS[k])
     i, j = parsed["mains"][mk]
-    st.caption(f"원문 줄 {i + 1}~{j} · 줄 수 {j - i - 1:,}")
+    ui.note(f"원문 {i + 1:,}~{j:,}번째 줄")
     subs = [k for k in rp.REPORT_BLOCK_LABELS if (k.startswith(mk + "_") or k == mk) and k in parsed["blocks"]]
     notes = [k for k in rp.REPORT_NOTES if k in parsed["blocks"]] if mk == "fin" else []
     for k in subs + notes:
         with st.expander(f"{rp.REPORT_BLOCK_LABELS[k]} (줄 {rp.block_first_line(parsed, k)}~)"):
-            st.code(rp.block_text(parsed, k, numbered=True, cap=60000), language=None)
+            ui.sheet(ui.numbered_rows(rp.block_text(parsed, k, numbered=True, cap=60000)))
     with st.expander("이 목차 전체 원문"):
-        st.code(rp.main_text(parsed, mk, numbered=True, cap=200000), language=None)
+        ui.sheet(ui.numbered_rows(rp.main_text(parsed, mk, numbered=True, cap=200000)))
 
 # ---------------- AI 분석 ----------------
 with tab_ai:
@@ -176,14 +166,15 @@ with tab_ai:
         if saved and saved["key"] == state_key:
             res = saved["res"]
             if res["text"]:
-                st.markdown(res["text"].replace("~", "\\~"))
+                ui.answer(res["text"])
                 bad = an.unverified_numbers(res["text"], res["body"])
                 if bad:
-                    st.warning("발췌에서 그대로 찾지 못한 숫자: " + ", ".join(bad) + " — 원문으로 꼭 확인하세요 (단위를 바꿔 쓴 경우일 수 있어요).")
+                    st.warning("AI가 읽은 발췌에 그대로 없는 숫자가 있어요: " + ", ".join(bad) + ". 단위를 바꿔 썼거나 잘못 옮긴 것일 수 있으니 원문으로 확인하세요.")
                 cites = an.cited_lines(res["text"])
                 if cites:
-                    with st.expander(f"근거 줄 보기 ({len(cites)}곳)"):
-                        show_lines(parsed, cites[:30])
+                    with st.expander(f"근거 줄 원문 보기 ({len(cites)}곳)"):
+                        ui.legend(marker_text="AI가 근거로 든 줄")
+                        ui.sheet(ui.around_rows(parsed["lines"], set(cites[:30])))
             elif not res["body"].strip() or not an.has_content(res["body"]):
                 st.warning("이 보고서에는 해당 내용이 거의 없어요. (분기·반기보고서는 생략되는 항목이 많아요.)")
             notes = []
@@ -193,7 +184,8 @@ with tab_ai:
                 notes.append("못 찾은 부분: " + ", ".join(res["missing"]))
             if res["truncated"]:
                 notes.append(f"길어서 앞 {an.MAX_REPORT_CHARS:,}자까지만 읽었어요")
-            st.caption(" · ".join(notes))
+            for n in notes:
+                ui.note(n)
 
 # ---------------- 달라진 문장 ----------------
 with tab_diff:
@@ -202,7 +194,7 @@ with tab_diff:
     if not prev:
         st.info("비교할 보고서가 목록(최근 4년)에 없어요.")
     else:
-        st.caption(f"비교 대상: {date_label(prev)}")
+        ui.note(f"비교 대상: {date_label(prev)}")
         try:
             with st.spinner("직전 보고서를 받아 비교하는 중..."):
                 prev_parsed = get_parsed(str(prev["rcept_no"]).strip())
@@ -213,28 +205,25 @@ with tab_diff:
             diffs, missing = an.report_diff(prev_parsed, parsed)
             if not diffs:
                 st.success("비교한 부분에서 문장이 바뀐 곳이 없어요. (숫자만 바뀐 줄은 뺐어요.)")
+            if diffs:
+                ui.legend(marker_text="이번에 새로 생긴 문장 (이번 보고서 줄 번호)", red_text="이번에 없어진 문장 (직전 보고서 줄 번호)")
             for d in diffs:
-                with st.expander(f"{d['label']} — 새로 {len(d['added'])}줄 · 없어짐 {len(d['removed'])}줄"):
-                    if d["added"]:
-                        st.markdown("**새로 생긴 문장** (이번 보고서 줄 번호)")
-                        st.code("\n".join(f"{n}: {s}" for n, s in d["added"][:200]), language=None)
-                    if d["removed"]:
-                        st.markdown("**없어진 문장** (직전 보고서 줄 번호)")
-                        st.code("\n".join(f"{n}: {s}" for n, s in d["removed"][:200]), language=None)
+                with st.expander(f"{d['label']}: 새 문장 {len(d['added'])}개, 없어진 문장 {len(d['removed'])}개"):
+                    ui.sheet([(n, s, "mark") for n, s in d["added"][:200]] + [(f"직전 {n}", s, "gone") for n, s in d["removed"][:200]])
             if missing:
-                st.caption("한쪽 보고서에 없어 비교 못 한 부분: " + ", ".join(missing))
+                ui.note("한쪽 보고서에 없어 비교하지 못한 부분: " + ", ".join(missing))
             if diffs and GEMINI_KEY and st.button("AI로 의미 있는 변화만 고르기", key="diff_ai"):
                 body, truncated = an.diff_input(diffs)
                 with st.spinner("변화를 고르는 중..."):
                     try:
                         prompt = an.build_prompt(corp["corp_name"], row, an.DIFF_SPEC, body, prev)
-                        st.markdown(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, an.AI_PERIODIC_SYSTEM,
-                                                   GEMINI_FALLBACK).replace("~", "\\~"))
+                        ui.answer(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, an.AI_PERIODIC_SYSTEM,
+                                                 GEMINI_FALLBACK))
                     except an.AiError as e:
                         st.error(str(e))
                 if truncated:
-                    st.caption(f"바뀐 문장이 많아 앞 {an.MAX_REPORT_CHARS:,}자까지만 AI에 보냈어요.")
+                    ui.note(f"바뀐 문장이 많아 앞 {an.MAX_REPORT_CHARS:,}자까지만 AI에 보냈어요.")
 
 # ---------------- 여러 회사 비교 (4단계) ----------------
 with tab_multi:
-    st.info("여러 회사를 한 지표로 비교하는 표(연봉 순위·가동률 비교 등)는 4단계에서 만들어요.")
+    st.info("여러 회사를 한 지표로 나란히 놓는 표(연봉 순위, 가동률 비교 등)는 4단계에서 이 자리에 들어와요.")

@@ -57,6 +57,7 @@ VIII. 임원 및 직원 등에 관한 사항
 XII. 상세표
 1. 연결대상 종속회사 현황(상세)
 종속회사 LG Energy Solution Michigan 등 95개사가 연결 대상에 포함됩니다.
+당기 중 미국 합작법인 두 곳을 새로 설립하여 연결 대상에 편입하였고, 중국 판매법인 한 곳은 청산하여 연결에서 제외하였습니다.
 """
 
 
@@ -100,6 +101,9 @@ def test_diff_and_numbers():
     ans = "가동률은 47.2%다 [II-3. 원재료 및 생산설비 · 줄 18]. 매출은 999,999 백만원."
     check(an.unverified_numbers(ans, body) == ["999,999"], "발췌에 없는 숫자만 골라냄 (줄 번호·있는 숫자는 통과)")
     check(an.cited_lines(ans) == [18], "근거 줄 번호 읽기")
+    check(an.has_content(body + "\n99: 당사는 북미 공장의 생산능력을 확대하기 위해 신규 라인 투자를 진행하고 있습니다.") and not an.has_content("[II-3. 원재료]\n12: 해당사항 없음"), "내용 거의 없으면 AI를 안 부름")
+    prompt = an.build_prompt("가나전지", {"report_nm": "사업보고서 (2025.12)", "rcept_no": "1"}, an.ANALYSIS_BY_KEY["plant"], body)
+    check("[발췌]" in prompt and "가동률" in prompt, "AI 질문 만들기")
 
 
 def test_report_names():

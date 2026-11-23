@@ -246,7 +246,7 @@ def build_prompt(corp, row, spec, body, prev_row=None):
 
 def has_content(body, needs_prev=False):
     """발췌가 거의 없으면(해당사항 없음 등) AI를 부르지 않는다."""
-    useful = re.sub(r"\[[^\]]*\]|(?m)^\d+: |\s+", "", body)
+    useful = re.sub(r"(?m)\[[^\]]*\]|^\d+: |\s+", "", body)
     return len(useful) >= (20 if needs_prev else 60)
 
 
