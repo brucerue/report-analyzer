@@ -2,6 +2,10 @@ name: golden
 # 실제 DART 보고서로 목차 나누기 확인 (수동 실행). 공개 저장소라 무료.
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: "카드 개선용 원문 맛보기도 찍기 (yes/no)"
+        default: "no"
 jobs:
   golden:
     runs-on: ubuntu-latest
@@ -12,6 +16,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: python tools/golden.py
+      - run: python tools/golden.py ${{ inputs.probe == 'yes' && '--probe' || '' }}
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}

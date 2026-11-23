@@ -6,6 +6,7 @@ python tools/golden.py --write   -> 지금 결과를 기대값으로 저장 (사
 기대값에는 블록 이름과 '필수 낱말'만 적는다 (원문은 저장하지 않음).
 """
 import json
+import re
 import os
 import sys
 import time
@@ -36,6 +37,29 @@ def pick(rows, kind, period):
         if dc.report_kind_of(r.get("report_nm")) == kind and (period is None or dc.report_period_of(r.get("report_nm")) == period):
             return r
     return None
+
+
+def probe(parsed):
+    """카드 개선용: 부분별 원문 맛보기 (공개 보고서 원문이라 로그에 남겨도 됨)."""
+    def dump(title, block, pat, after=8, limit=40):
+        lines = pt.block_lines(parsed, block)
+        out, used = [], set()
+        for i, (no, t) in enumerate(lines):
+            if re.search(pat, t):
+                for no2, t2 in lines[max(0, i - 1):i + after]:
+                    if no2 not in used:
+                        used.add(no2)
+                        out.append(f"      {no2}: {t2[:200]}")
+            if len(out) >= limit:
+                break
+        print(f"--- 맛보기 {title} ({block}) ---")
+        print("\n".join(out[:limit]) or "      (없음)")
+    dump("가동률", "biz_plant", r"가동률", after=10, limit=45)
+    dump("원재료 매입", "biz_plant", r"매입|원재료", after=3, limit=20)
+    dump("시설투자", "biz_plant", r"투자", after=6, limit=25)
+    dump("지역", "biz_sales", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=30)
+    dump("부문 정보 지역", "note_segment", r"지역|미주|미국|북미|유럽|중국|아시아", after=6, limit=25)
+    dump("출자 표 머리", "detail_invest", r"법인명|단위", after=4, limit=14)
 
 
 def show_cards(parsed, corp_code, row, session, cache, key):
@@ -114,6 +138,8 @@ def main():
             show(name, row, parsed, s)
             c = dc.find_corps(corps, e["corp"], limit=1)
             show_cards(parsed, c[0]["corp_code"] if c else None, row, session, cache, key)
+            if "--probe" in sys.argv:
+                probe(parsed)
             results[name] = {"corp": e["corp"], "report": e.get("report", ""), "rcept_no": e["rcept_no"], **s}
             return row
         c = dc.find_corps(corps, corp_name, limit=1)
