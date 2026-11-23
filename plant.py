@@ -112,18 +112,41 @@ def pp(d):
 
 
 def man_dae(v):
-    """대 -> 기사체 '290만1천대' / '5만2천대' / '8,000대'."""
+    """대 -> 기사체 (천 대 아래 반올림): 3,166,900 -> '316만7천대', 52,000 -> '5만2천대', 8,000 -> '8천대'."""
     if v is None:
         return "-"
-    v = int(round(v))
+    v = int(round(v / 1000.0)) * 1000 if abs(v) >= 10000 else int(round(v))
     man, cheon = v // 10000, (v % 10000) // 1000
     if man:
-        return f"{man}만" + (f"{cheon}천대" if cheon else "대")
-    return f"{v:,}대"
+        return f"{man:,}만" + (f"{cheon}천대" if cheon else "대")
+    return f"{cheon}천대" if v % 1000 == 0 and cheon else f"{v:,}대"
 
 
 def label(r):
     return f"{r['name']}({r['place']})" if r["place"] else r["name"]
+
+
+def _batchim(word):
+    """끝 글자(괄호 안이면 그 안의 끝 한글)에 받침이 있으면 True, ㄹ 받침이면 'ㄹ', 모르면 None."""
+    w = re.sub(r"[)\]\s]+$", "", str(word))
+    for ch in reversed(w):
+        if "가" <= ch <= "힣":
+            jong = (ord(ch) - 0xAC00) % 28
+            return "ㄹ" if jong == 8 else bool(jong)
+        if ch.isdigit():
+            return ch in "013678"  # 영·일·삼·육·칠·팔
+        if ch.isalpha():
+            return ch.upper() in "LMNR"
+    return None
+
+
+def josa(word, pair):
+    """josa('HMB(브라질)', '은/는') -> 'HMB(브라질)은'. pair: '은/는', '이/가', '으로/로', '과/와'."""
+    a, b = pair.split("/")
+    bat = _batchim(word)
+    if pair == "으로/로":
+        return word + ("로" if bat in (False, "ㄹ", None) else "으로")
+    return word + (a if bat else b)
 
 
 def amount(v, unit):
@@ -133,33 +156,56 @@ def amount(v, unit):
     return f"{v:,}{u}"
 
 
-def sentences(st, period_text="이번 기간"):
-    """합산 묶음 하나(compare의 sets 원소) -> 숫자로만 만든 기사용 문장 (AI 없음). 1년 전과는 같은 공장끼리 비교."""
-    out, u = [], st["unit"]
-    noun = "생산거점" if any(r["place"] for r in st["rows"]) else "품목"
+COUNTABLE = ("대", "천대", "개", "천개", "톤", "천톤", "만대")
+
+
+def sentences(st, period_text="이번 기간", annual=False):
+    """합산 묶음 하나(compare의 sets 원소) -> 숫자로만 만든 기사용 문장 (AI 없음). 1년 전과는 같은 공장끼리 비교.
+    annual=True(사업보고서)면 '지난해 같은 기간' 대신 '전년'."""
+    out, u, rows = [], st["unit"], st["rows"]
+    has_place = any(r["place"] for r in rows)
+    noun = "생산거점" if has_place else "품목"
+    before = "전년" if annual else "지난해 같은 기간"
     now, prev = st["same"], st["prev"]
+
+    def move(a, b):  # '보다 8.2%p 하락했다' / '과 같았다'
+        d = a - b
+        return f"보다 {pp(d)}했다" if round(d, 1) else "과 같았다"
+
+    subject = f"{period_text} {now['n']}개 {noun}의 전체 가동률은" if now and now["n"] > 1 else (
+        f"{period_text} {josa(label(rows[0]), '은/는')} 가동률" if rows else "")
     if now and prev and prev["rate"] is not None:
-        out.append(f"{period_text} {now['n']}개 {noun}의 전체 가동률은 {now['rate']:.1f}%로 지난해 같은 기간({prev['rate']:.1f}%)보다 "
-                   f"{pp(now['rate'] - prev['rate'])}했다.".replace("변동 없음했다", "같았다"))
-        if prev["cap"] and prev["prod"]:
+        if now["n"] > 1:
+            out.append(f"{subject} {now['rate']:.1f}%로 {before}({prev['rate']:.1f}%){move(now['rate'], prev['rate']).replace('과 같았다', '과 같았다')}."
+                       .replace(f"{before}({prev['rate']:.1f}%)과", f"{before}({prev['rate']:.1f}%)과"))
+        else:
+            out.append(f"{period_text} {label(rows[0])} 가동률은 {now['rate']:.1f}%로 {before}({prev['rate']:.1f}%){move(now['rate'], prev['rate'])}.")
+        if u in COUNTABLE and prev["cap"] and prev["prod"] and now["n"] > 1:
             cc, pc = (now["cap"] - prev["cap"]) / prev["cap"] * 100, (now["prod"] - prev["prod"]) / prev["prod"] * 100
             out.append(f"전체 생산능력은 {amount(prev['cap'], u)}에서 {amount(now['cap'], u)}로 {abs(cc):.1f}% {'증가' if cc >= 0 else '감소'}했고, "
                        f"생산량은 {amount(prev['prod'], u)}에서 {amount(now['prod'], u)}로 {abs(pc):.1f}%({amount(abs(now['prod'] - prev['prod']), u)}) "
                        f"{'증가' if pc >= 0 else '감소'}했다.")
-        for name, a, b in (("국내", st["now_dom"], st["prev_dom"]), ("해외", st["now_abr"], st["prev_abr"])):
-            if a and b and b["rate"] is not None:
-                n = f" {a['n']}개 공장의" if a["n"] > 1 else " 공장"
-                out.append(f"{name}{n} 가동률은 지난해 {b['rate']:.1f}%에서 올해 {a['rate']:.1f}%로 {pp(a['rate'] - b['rate'])}했다."
-                           .replace("변동 없음했다", "같았다"))
+        if has_place and now["n"] > 1:
+            for name, a, b in (("국내", st["now_dom"], st["prev_dom"]), ("해외", st["now_abr"], st["prev_abr"])):
+                if a and b and b["rate"] is not None:
+                    n = f" {a['n']}개 공장의 합산" if a["n"] > 1 else " 공장"
+                    d = a["rate"] - b["rate"]
+                    tail = f"{pp(d)}했다" if round(d, 1) else "같았다"
+                    out.append(f"{name}{n} 가동률은 {'전년' if annual else '지난해'} {b['rate']:.1f}%에서 {'' if annual else '올해 '}{a['rate']:.1f}%로 {tail}.")
     elif st["now"]["rate"] is not None:
-        out.append(f"{period_text} {st['now']['n']}개 {noun}의 전체 가동률은 {st['now']['rate']:.1f}%다. (1년 전 같은 기간 보고서가 없어 비교하지 못했어요)")
-    ranked = [r for r in st["rows"] if r.get("diff") is not None]
-    if ranked:
+        if st["now"]["n"] > 1:
+            out.append(f"{period_text} {st['now']['n']}개 {noun}의 전체 가동률은 {st['now']['rate']:.1f}%다.")
+        elif rows:
+            out.append(f"{period_text} {label(rows[0])} 가동률은 {rows[0]['rate']:.1f}%다.")
+        out.append("(1년 전 같은 기간 보고서가 없거나 같은 이름의 거점이 없어 비교하지 못했어요.)")
+    ranked = [r for r in rows if r.get("diff") is not None]
+    if len(ranked) > 1:
         worst, best = min(ranked, key=lambda r: r["diff"]), max(ranked, key=lambda r: r["diff"])
-        out.append(f"하락 폭이 가장 큰 곳은 {label(worst)}로 {worst['prev_rate']:.1f}%에서 {worst['rate']:.1f}%로 {pp(worst['diff'])}했다.")
-        if best["diff"] > 0:
-            out.append(f"반면 {label(best)}은 {best['prev_rate']:.1f}%에서 {best['rate']:.1f}%로 {pp(best['diff'])}했다.")
-    if len(st["rows"]) > 1:
-        low, high = min(st["rows"], key=lambda r: r["rate"]), max(st["rows"], key=lambda r: r["rate"])
+        if worst["diff"] < 0:
+            out.append(f"하락 폭이 가장 큰 곳은 {josa(label(worst), '으로/로')} {worst['prev_rate']:.1f}%에서 {worst['rate']:.1f}%로 {pp(worst['diff'])}했다.")
+        if best["diff"] > 0 and best is not worst:
+            out.append(f"반면 {josa(label(best), '은/는')} {best['prev_rate']:.1f}%에서 {best['rate']:.1f}%로 {pp(best['diff'])}했다.")
+    if len(rows) > 1:
+        low, high = min(rows, key=lambda r: r["rate"]), max(rows, key=lambda r: r["rate"])
         out.append(f"가동률이 가장 낮은 곳은 {label(low)}({low['rate']:.1f}%), 가장 높은 곳은 {label(high)}({high['rate']:.1f}%)다.")
     return out

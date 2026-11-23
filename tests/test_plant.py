@@ -63,8 +63,11 @@ def test_compare_and_sentences():
     check(car["unit"] == "대" and res["sets"][1]["unit"] == "시간", "단위가 '대, 시간'이면 사업부문 이름으로 고름")
     check(any(x.startswith("국내 공장 가동률은 지난해 101.7%에서 올해 93.6%로 8.1%p 하락") for x in s), "공장 하나면 보고서 값")
     check(s[0].startswith("올해 1∼9월 4개 생산거점의 전체 가동률은 88.9%로 지난해 같은 기간(97.1%)보다 8.2%p 하락했다"), "첫 문장")
-    check("생산량은 176만4천대에서 159만7천대로" in s[1], "생산량 기사체")
-    check(any(x.startswith("하락 폭이 가장 큰 곳은 HMGMA(미국)로 68.1%에서 41.4%로 26.7%p 하락") for x in s), "하락 폭 최대")
+    check("생산량은 176만4천대에서 159만8천대로" in s[1], "생산량 기사체 (천 대 아래 반올림)")
+    check(plant.man_dae(3166900) == "316만7천대" and plant.man_dae(2727500) == "272만8천대" and plant.man_dae(52000) == "5만2천대" and plant.man_dae(8000) == "8천대", "만·천대 반올림")
+    check(plant.josa("TV, 모니터 등", "으로/로") == "TV, 모니터 등으로" and plant.josa("HMB(브라질)", "은/는") == "HMB(브라질)은"
+          and plant.josa("HMMA(미국)", "으로/로") == "HMMA(미국)으로" and plant.josa("HMI(인도)", "은/는") == "HMI(인도)는" and plant.josa("서울", "으로/로") == "서울로", "조사")
+    check(any(x.startswith("하락 폭이 가장 큰 곳은 HMGMA(미국)으로 68.1%에서 41.4%로 26.7%p 하락") for x in s), "하락 폭 최대")
     check(any("반면 HMMA(미국)은 99.4%에서 101.0%로 1.6%p 상승" in x for x in s), "상승한 곳")
     check(any("가장 낮은 곳은 HMMI(인도네시아)(35.8%)" in x for x in s), "최저·최고")
 
@@ -89,8 +92,13 @@ x | 1 |
 """
     res = plant.compare(rp.parse_report(text), None)
     check([(s["label"], s["unit"], len(s["rows"])) for s in res["sets"]] == [("DX 부문", "천대", 2), ("DS 부문", "시간", 1)], "삼성: 부문·단위별 묶음")
-    s = plant.sentences(res["sets"][0], "2025년")
-    check("2개 품목의 전체 가동률은 79.3%다" in s[0], "1년 전 없으면 이번 값만")
+    s = plant.sentences(res["sets"][0], "2025년", annual=True)
+    check("2개 품목의 전체 가동률은 79.3%다" in s[0] and not any("해외" in x or "국내" in x for x in s), "1년 전 없으면 이번 값만, 소재지 없는 품목 표는 국내·해외 문장 없음")
+    one = plant.sentences(res["sets"][1], "2025년", annual=True)
+    check(one[0] == "2025년 메모리 가동률은 100.0%다." and not any("하락 폭" in x or "생산량" in x for x in one), "한 품목·시간 단위: 어색한 문장 없음")
+    row = dict(res["sets"][0]["rows"][0]); row.update(prev_rate=79.8, prev_cap=1, prev_prod=1, diff=-1.0)
+    st1 = dict(res["sets"][0], rows=[row], same=plant.total([row]), prev=plant.total([row], prev=True))
+    check(plant.sentences(st1, "2025년", annual=True)[0] == "2025년 TV, 모니터 등 가동률은 78.8%로 전년(79.8%)보다 1.0%p 하락했다.", "사업보고서는 '전년'")
 
 
 if __name__ == "__main__":

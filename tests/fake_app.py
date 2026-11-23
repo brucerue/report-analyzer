@@ -38,4 +38,8 @@ an.call_gemini = lambda *a, **k: (
     "- 회사는 주요 원재료인 양극재 가격이 하락했다고 설명 [II-3. 원재료 및 생산설비 · 줄 17]\n"
     "- 미주 매출은 133,274,900 백만원이다 [II-4. 매출 및 수주상황 · 줄 19]\n\n"
     "**기사로 쓴다면 확인할 것**\n- 가동률이 낮아진 공장은 어디인지")
+from test_plant import NOW, PREV  # 현대차 3분기 모양 가동률 표
+_orig = dc.report_text
+PLANT = "3. 원재료 및 생산설비\n(3) 가동률\n| (단위 : 대, 시간) |\n사업부문 | 법인명 | 소재지 | 기간 |\n생산능력 | 생산실적 | 가동률(%) |\n{rows}\n"
+dc.report_text = lambda s, c, key, rno: _orig(s, c, key, rno).replace("3. 원재료 및 생산설비\n", PLANT.format(rows=NOW if rno.startswith("2026") else PREV), 1)
 runpy.run_path(os.path.join(HERE, "..", "app.py"), run_name="__main__")

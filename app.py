@@ -14,7 +14,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 15:52"
+LAST_UPDATED = "2026.11.23 15:56"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -174,7 +174,7 @@ with tab_point:
         ui.note("보고서의 '생산능력 | 생산실적 | 가동률' 표를 읽었어요. 1년 전은 같은 기간 보고서의 같은 공장끼리 비교해요.")
         for one in pres["sets"]:
             ui.plant_table(one)
-            lines = plant.sentences(one, period_phrase(row))
+            lines = plant.sentences(one, period_phrase(row), annual="사업" in dc.report_kind_of(row.get("report_nm")))
             if lines:
                 ui.note("기사용 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
                 st.code("\n".join(lines), language=None, wrap_lines=True)
