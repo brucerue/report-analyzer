@@ -772,7 +772,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                     if reprt != "11013" and qp and qp[k] is not None and q[k] is not None:
                         parts.append(f"{L['q_prev']} 대비 {fn(q[k], qp[k])}")
                     if pq and pq.get(k) is not None and q[k] is not None:
-                        parts.append(f"직전 분기({L['prevq']}) 대비 {fn(q[k], pq[k])}")
+                        parts.append((f"직전 분기({L['prevq']})" if L["prevq"] else "직전 분기") + f" 대비 {fn(q[k], pq[k])}")
                     return f" ({' · '.join(parts)})" if parts else ""
                 if reprt != "11013" or pq:
                     rows0.append((f"{ql} 매출", won_text(q["rev"]) + cmp("rev", change_text), None))
