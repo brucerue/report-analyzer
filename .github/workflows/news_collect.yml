@@ -1,0 +1,52 @@
+name: news_collect
+# 정기보고서 기사 모으기 (네이버 뉴스 검색 API, 수동 실행). 결과(제목·요약·링크)는 비공개 paper-private의 report-news 브랜치에만 올린다.
+# 로그엔 건수만. Secrets: NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, PAPER_PRIVATE_TOKEN(paper-private Contents 읽기·쓰기).
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: "검색어 하나당 몇 쪽(100건씩, 1~10)"
+        default: "10"
+permissions:
+  contents: read
+concurrency:
+  group: news_collect
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: paper-private report-news 브랜치 받기 (없으면 새로)
+        env:
+          TOKEN: ${{ secrets.PAPER_PRIVATE_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$TOKEN" ]; then echo "PAPER_PRIVATE_TOKEN이 없어요 (이 저장소 Secrets)"; exit 1; fi
+          URL="https://x-access-token:${TOKEN}@github.com/brucerue/paper-private.git"
+          if git clone -q --depth 1 --branch report-news "$URL" out 2>/dev/null; then
+            echo "기존 브랜치 받음"
+          else
+            mkdir out && cd out && git init -q && git checkout -q -b report-news && git remote add origin "$URL" && cd ..
+            echo "새 브랜치 만듦"
+          fi
+      - name: 기사 모으기
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python tools/news_collect.py --out out/naver_reports.jsonl --summary out/summary.md --pages "${{ inputs.pages }}"
+      - name: paper-private에 올리기
+        run: |
+          cd out
+          git config user.name "report-analyzer bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "바뀐 것 없음"; exit 0; fi
+          git commit -q -m "정기보고서 기사 모으기 $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q origin report-news
+          echo "올림"

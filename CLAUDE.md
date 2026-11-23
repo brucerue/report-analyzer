@@ -34,7 +34,7 @@
 2. 기사 포인트 카드(완료): 출자·종속회사 → 임원·직원 → 주주환원·지분 → 가동률(plant.py, 공장별 표+기사 문장) → R&D → 지역별 매출(주석 지역 공시). 다음 후보: 원재료 매입액·시설투자.
 3. 골든 시험(완료): 삼성전자·KB금융·에코프로비엠·현대차 반기·현대차 정정본.
 4. 여러 회사 비교(완료): 회사 이름·업종 묶음, 같은 기간 지표 표, 순위 문장.
-5. 네이버 검색 API 기사 수집(DART-Joongang 워크플로에서 실행, 결과는 paper-private에만).
+5. 네이버 검색 API 기사 수집(완료): `tools/news_collect.py` + Actions 'news_collect'(수동, 이 공개 저장소에서 실행 — 무료). 결과는 paper-private `report-news` 브랜치(naver_reports.jsonl·summary.md)에만, 로그엔 건수만. Secrets: NAVER_CLIENT_ID·NAVER_CLIENT_SECRET·PAPER_PRIVATE_TOKEN.
 
 ## 알아 둘 함정
 - 목차는 회사·연도마다 조금씩 다르다. 금융업은 II가 '영업의 현황' 등으로 다르다(`biz_fin_*`).
