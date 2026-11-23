@@ -91,7 +91,13 @@ def test_rnd_plant_region():
     cards = {c["key"]: c for c in pt.build_cards(p, None, None)}
     check(cards["rnd"]["value"] == "2.5%" and cards["rnd"]["change"] == "0.10%p 하락", "R&D 카드")
     half = {c["key"]: c for c in pt.build_cards(p, None, None, reprt="11012")}
-    check("직전 사업연도 전체" in half["rnd"]["rows"][0][1] and "감소" not in half["rnd"]["rows"][0][1], "반기 R&D는 연간 금액과 증감을 내지 않음")
+    check("(" not in half["rnd"]["rows"][0][1] and half["rnd"]["change"] is None and "1년 전 같은 기간" in half["rnd"]["note"],
+          "반기 R&D: 1년 전 같은 기간 보고서가 없으면 비교하지 않음 (연간 칸과 비교 안 함)")
+    prev = rp.parse_report(REPORT.replace("{x}", "").replace("2,388,938", "2,000,000").replace("2.5%", "2.2%"))
+    h2 = {c["key"]: c for c in pt.build_cards(p, prev, None, reprt="11012", period="2026년 1∼6월")}["rnd"]
+    check(h2["prev"] == "2025년 1∼6월 2.2%" and "2025년 1∼6월" in h2["rows"][0][1] and "증가" in h2["rows"][0][1],
+          "반기 R&D: 1년 전 같은 기간 보고서의 당기 칸과 비교")
+    check(any("지난해 같은 기간(2.2%)보다" in x for x in h2["sentences"]), "R&D 문장도 전년 동기 기준")
     check(pt.change_text(30.67, 30.67, pct=False) == "변동 없음", "변동 없음")
     check(cards["plant"]["rows"][0][1] == "(3) 가동률" and any("86.2" in r[1] and r[2] for r in cards["plant"]["rows"]), "가동률 제목 줄과 그 아래 표 줄 (계산 없이)")
     check(any("미주" in r[1] for r in cards["region"]["rows"]), "지역별 매출 원문 줄")
@@ -249,6 +255,20 @@ def test_income():
     check(any(r[0] == "2026년 3분기(7∼9월) 영업이익" and "2025년 3분기 대비 흑자 전환" in r[1] for r in c["rows"]), "분기 줄: 2026년 3분기(7∼9월), 2025년 3분기 대비")
     check(pt.period_labels("2025년", "11011")["prev"] == "2024년" and pt.period_labels("2026년 상반기", "11012")["q_now"] == "2026년 2분기(4∼6월)"
           and pt.period_labels("2026년 1분기", "11013")["title"] == "2026년 1분기", "기간 이름 (사업·반기·1분기)")
+    L = pt.period_labels("2026년 1∼9월", "11014")
+    check(L["prev_end"] == "2025년 말" and L["same_point"] == "2025년 9월 말" and L["prevq"] == "2026년 2분기"
+          and pt.period_labels("2026년 1분기", "11013")["prevq"] == "2025년 4분기" and pt.period_labels("2025년", "11011")["same_point"] == "2024년 말",
+          "비교 시점 이름 (잔액=지난해 말, 직원·주주=1년 전 같은 시점, 직전 분기)")
+    h1 = [dict(r, thstrm_amount=v) for r, v in zip(q3, ("45,000", "1,000", "100"))]
+    pq = pt.prev_quarter(lambda y, r: h1 if (y, r) == (2026, "11012") else [], 2026, "11014")
+    check(pq == {"rev": 45000, "op": 1000}, "직전 분기 = 같은 해 반기보고서의 2분기 3개월")
+    yr4 = [dict(r, thstrm_amount=v) for r, v in zip(q3, ("200,000", "12,000", "0"))]
+    q4 = pt.prev_quarter(lambda y, r: {(2025, "11011"): yr4, (2025, "11014"): q3}.get((y, r), []), 2026, "11013")
+    check(q4 == {"rev": 60000, "op": 3000}, "1분기의 직전 분기 = 작년 연간 - 작년 3분기 누적")
+    fin2 = dict(fin, prevq={"rev": 45000, "op": 1000})
+    c2 = {x["key"]: x for x in pt.build_cards(None, None, None, reprt="11014", fin_api=lambda: fin2, part="fast", period="2026년 1∼9월")}["income"]
+    check(any(r[0] == "2026년 3분기(7∼9월) 영업이익" and "직전 분기(2026년 2분기) 대비 100.0% 증가" in r[1] for r in c2["rows"]), "분기 줄에 직전 분기 대비")
+    check(any(x.startswith("직전 분기인 2026년 2분기와 비교하면 영업이익이 100.0% 증가했다") for x in c2["sentences"]), "QoQ 기사 문장")
     loss = dict(pt.fin_stats([dict(r, thstrm_add_amount="", frmtrm_add_amount="", thstrm_amount=r["thstrm_amount"].replace("2,000", "-34,000000000").replace("46,000", "2531000000000").replace("500", "-81000000000"),
                                    frmtrm_amount=r["frmtrm_amount"].replace("-1,000", "112000000000").replace("43,000", "2774000000000").replace("-300", "54000000000")) for r in q3]), fs="연결")
     lc = {x["key"]: x for x in pt.build_cards(None, None, None, fin_api=lambda: loss, part="fast")}["income"]

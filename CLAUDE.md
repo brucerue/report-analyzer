@@ -27,7 +27,7 @@
 - `compare.py`: 여러 회사 비교. 기본 지표는 DART 주요정보 API(회사별 동시 조회, 한 회사 오류는 비고로), 원문 지표(R&D·가동률·해외 비중)는 선택. 업종 묶음 `INDUSTRY_GROUPS`(DART-Joongang에서 옮김)·줄임말 `ALIASES`. `rank_sentence`가 순위 문장(증감률은 나열). 화면은 app.py `render_multi`(맨 위 '여러 회사 비교').
 - `writer.py`: 카드 숫자 → 기사 문장 (모든 카드 같은 규칙: 증가·감소/상승·하락/흑자·적자 전환, 기간 '2025년…전년' / '2026년 1∼9월…지난해 같은 기간', 조사 plant.josa). 회사 설명은 인용 한 문장, 표 줄 카드는 문장 없음. 카드에는 문장을 보여 주지 않고 '기사 쓰기' 재료로만 쓴다.
 - `article.py`: '기사 쓰기' 탭 — 고른 요소를 리드부터 엮어 제목 후보·본문(첫 문장 '○○가 ○일 공시한 … 보고서에 따르면'), 선택 Gemini 다듬기 + 숫자 대조.
-- 카드 기간 이름은 `points.period_labels`(이번·작년 같은 기간·누적 제목·이번 분기 3개월).
+- 카드 기간 이름은 `points.period_labels`(이번·작년 같은 기간·누적 제목·이번 분기 3개월·prev_end '2025년 말'·same_point '2025년 9월 말'·prevq). 비교 기준: 기간 값=전년 동기(R&D도 1년 전 같은 기간 보고서), 잔액=지난해 말, 직원·소액주주·종속회사=1년 전 같은 시점, 분기 실적은 직전 분기(`points.prev_quarter`)도.
 - `ui.py`: 화면 꾸미기 '교정지' — 종이 #F2F4F3 · 먹 #1F2B30 · 형광펜 #EEF36A(근거·새 문장) · 교정 빨강 #B8322A(없어진 문장) · 인주 청 #24479A. 원문은 괘선+줄 번호. HTML 조각은 `st.html`(스타일 포함), AI 답만 마크다운.
 - `tests/fake_app.py`: 가짜 DART·AI 응답으로 앱 띄우기 (`streamlit run tests/fake_app.py`) — 화면 확인용.
 - 화면 흐름: 보고서를 고르면 `points.build_cards(part='fast')`(원문 없이 DART 자료만)를 먼저 그리고, `load_parsed`가 원문을 받아(진행 표시, `dart_client.DOC_DEADLINE` 90초 넘으면 끊음, 메모리+디스크 `/tmp/report-analyzer-cache` 일주일) `part='doc'` 카드·공장별 가동률·다른 탭을 채운다.

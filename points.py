@@ -687,9 +687,39 @@ def period_labels(period, reprt):
     m = re.match(r"(\d{4})년", period or "")
     y = int(m.group(1)) if m else None
     q = {"11014": "3분기(7∼9월)", "11012": "2분기(4∼6월)"}.get(reprt)
+    month = {"11011": 12, "11012": 6, "11013": 3, "11014": 9}.get(reprt, 12)
+    prevq = {"11014": f"{y}년 2분기", "11012": f"{y}년 1분기", "11013": f"{(y or 1) - 1}년 4분기"}.get(reprt) if y else None
     return dict(now=period if y else "이번 기간", prev=period.replace(f"{y}년", f"{y - 1}년", 1) if y else "전년 같은 기간",
                 title=(period + (" 누적" if reprt in ("11012", "11014") else "")) if y else "",
-                q_now=f"{y}년 {q}" if q and y else None, q_prev=f"{y - 1}년 {q.split('(')[0]}" if q and y else "전년 같은 분기")
+                q_now=f"{y}년 {q}" if q and y else None, q_prev=f"{y - 1}년 {q.split('(')[0]}" if q and y else "전년 같은 분기",
+                prev_end=f"{y - 1}년 말" if y else "전기말",  # 잔액(부채·현금·지분)의 비교 시점 = 지난 사업연도 말
+                same_point=(f"{y - 1}년 말" if month == 12 else f"{y - 1}년 {month}월 말") if y else "1년 전",  # 직원·소액주주: 1년 전 같은 시점
+                prevq=prevq)
+
+
+def prev_quarter(fetch_rows, year, reprt):
+    """직전 분기 3개월 매출·영업이익 (QoQ). fetch_rows(연도, 보고서코드) -> 재무제표 행.
+    3분기 보고서 -> 같은 해 반기보고서의 2분기 3개월, 반기 -> 1분기, 1분기 -> 작년 4분기 = 작년 연간 - 작년 3분기 누적.
+    -> {rev, op} 또는 None."""
+    try:
+        if reprt == "11014":
+            rows = fetch_rows(year, "11012")
+            return {k: income_pick(rows, k, "thstrm_amount") for k in ("rev", "op")} if rows else None
+        if reprt == "11012":
+            rows = fetch_rows(year, "11013")
+            return {k: income_pick(rows, k, "thstrm_amount") for k in ("rev", "op")} if rows else None
+        if reprt == "11013":
+            a, q3 = fetch_rows(year - 1, "11011"), fetch_rows(year - 1, "11014")
+            if not a or not q3:
+                return None
+            out = {}
+            for k in ("rev", "op"):
+                y_all, cum9 = income_pick(a, k, "thstrm_amount"), income_pick(q3, k, "thstrm_add_amount")
+                out[k] = y_all - cum9 if y_all is not None and cum9 is not None else None
+            return out
+    except Exception:
+        return None
+    return None
 
 
 EMPTY = {"lines": [], "mains": {}, "blocks": {}}
@@ -731,11 +761,22 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                       + (f" ({L['prev']} {signed(p['net'], '순손실')}, {profit_change(n['net'], p['net'])})" if p["net"] is not None and n["net"] is not None else ""), None)]
             if margin is not None:
                 rows0.append(("영업이익률", f"{margin:.1f}%" + (f" ({L['prev']} {pmargin:.1f}%)" if pmargin is not None else ""), None))
-            if qtr and reprt in ("11012", "11014") and (qtr["now"]["rev"] is not None or qtr["now"]["op"] is not None):
-                q, qp = qtr["now"], qtr["prev"]
-                rows0.append((f"{L['q_now'] or '이번 분기(3개월)'} 매출", won_text(q["rev"]) + (f" ({L['q_prev']} 대비 {change_text(q['rev'], qp['rev'])})" if qp["rev"] else ""), None))
-                rows0.append((f"{L['q_now'] or '이번 분기(3개월)'} 영업이익", (signed(q["op"], "영업손실") if q["op"] is not None else "-")
-                              + (f" ({L['q_prev']} 대비 {profit_change(q['op'], qp['op'])})" if qp["op"] is not None and q["op"] is not None else ""), None))
+            pq = fin.get("prevq")  # 직전 분기 3개월 (QoQ)
+            q = qtr["now"] if qtr and reprt in ("11012", "11014") else (n if reprt == "11013" else None)  # 1분기는 누적 = 3개월
+            qp = qtr["prev"] if qtr and reprt in ("11012", "11014") else (p if reprt == "11013" else None)
+            if q and (q["rev"] is not None or q["op"] is not None):
+                ql = L["q_now"] or (f"{L['now']}(1∼3월)" if reprt == "11013" else "이번 분기(3개월)")
+
+                def cmp(k, fn):
+                    parts = []
+                    if reprt != "11013" and qp and qp[k] is not None and q[k] is not None:
+                        parts.append(f"{L['q_prev']} 대비 {fn(q[k], qp[k])}")
+                    if pq and pq.get(k) is not None and q[k] is not None:
+                        parts.append(f"직전 분기({L['prevq']}) 대비 {fn(q[k], pq[k])}")
+                    return f" ({' · '.join(parts)})" if parts else ""
+                if reprt != "11013" or pq:
+                    rows0.append((f"{ql} 매출", won_text(q["rev"]) + cmp("rev", change_text), None))
+                    rows0.append((f"{ql} 영업이익", (signed(q["op"], "영업손실") if q["op"] is not None else "-") + cmp("op", profit_change), None))
             rows0 = [r for r in rows0 if not (r[1] == "-" or r[1].startswith("- "))]  # 값 없음만 숨김 (마이너스 숫자는 남김)
             out.append(card("income", f"실적 · {L['title']}" if L["title"] else "실적", value=pl_text("영업", n["op"]) if n["op"] is not None else None,
                             prev=f"{L['prev']} {pl_text('영업', p['op'])}" if p["op"] is not None else None,
@@ -743,7 +784,8 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                             note="DART 재무제표 손익계산서 값이에요. 실적 변동 이유는 아래 '회사 설명' 카드(경영진단 원문 줄)를 보세요.",
                             source=f"DART 재무제표({fin.get('fs', '')}) · 손익계산서",
                             data=dict(now=n, prev=p, qtr=qtr if reprt in ("11012", "11014") else None, margin=margin, pmargin=pmargin, fs=fin.get("fs", ""),
-                                      q_label=L["q_now"].split(" ", 1)[1] if L["q_now"] else "분기(3개월)")))
+                                      q_label=L["q_now"].split(" ", 1)[1] if L["q_now"] else "분기(3개월)", prevq=fin.get("prevq"), prevq_label=L["prevq"],
+                                      q_now=q)))
     reasons = mdna_reason_lines(parsed)
     if reasons:
         out.append(card("reason", "실적 변동 이유 (회사 설명, 원문 줄)", rows=[("", t, no) for no, t in reasons],
@@ -757,7 +799,8 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         for r in rows[:6]:
             amt = money_text(r["amount"], money)
             lines.append((f"{r['name']} — {r['kind']}", f"{amt} · 지분율 {pct_or_dash(r['rate0'])} → {pct_or_dash(r['rate1'])}", r["line"]))
-        out.append(card("invest", "타법인 출자 변동", value=f"{len(rows)}곳", note="취득·처분 금액이 큰 순 (평가손익만 바뀐 곳은 뺌)",
+        out.append(card("invest", "타법인 출자 변동", value=f"{len(rows)}곳",
+                        note=f"취득·처분 금액이 큰 순 (평가손익만 바뀐 곳은 뺌). 지분율은 기초({L['prev_end']}) → 기말.",
                         rows=lines, source=f"{rp.REPORT_BLOCK_LABELS['detail_invest']} · 단위 {money or '?'}", data=dict(rows=rows, unit=money)))
     elif "detail_invest" in parsed["blocks"]:
         n = getattr(invest_changes, "seen", 0)
@@ -792,10 +835,10 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         said = stated_count(summary)
         if said and said != len(names):
             note = (note + " " if note else "") + f"표의 행은 {len(names)}곳이에요 (보고서 문장의 숫자를 위에 적었어요)."
-        out.append(card("consol", "연결 종속회사", value=f"{said or len(names)}곳", prev=f"1년 전 표 {len(prev_names)}곳" if prev_names else None,
+        out.append(card("consol", "연결 종속회사", value=f"{said or len(names)}곳", prev=f"{L['same_point']} 표 {len(prev_names)}곳" if prev_names else None,
                         change=(f"{len(names) - len(prev_names):+d}곳 (표 행 기준)" if prev_names else None), note=note, rows=rows2,
                         source=rp.REPORT_BLOCK_LABELS["detail_consol"],
-                        data=dict(count=said or len(names), rows_now=len(names), rows_prev=len(prev_names) if prev_names else None,
+                        data=dict(same_point=L["same_point"], count=said or len(names), rows_now=len(names), rows_prev=len(prev_names) if prev_names else None,
                                   new=[n for _, n in new] if prev_names else [], gone=gone if prev_names else [])))
 
     if api:
@@ -803,17 +846,17 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         now, prev = api("empSttus")
         e1, e0 = employee_stats(now), employee_stats(prev)
         if e1["count"]:
-            rows3 = [("1인 평균 급여", f"{won_text(e1['avg'])}" + (f" (1년 전 {won_text(e0['avg'])}, {change_text(e1['avg'], e0['avg'])})" if e0['avg'] else ""), None)]
+            rows3 = [("1인 평균 급여", f"{won_text(e1['avg'])}" + (f" ({L['prev']} {won_text(e0['avg'])}, {change_text(e1['avg'], e0['avg'])})" if e0['avg'] else ""), None)]
             if e1["tenure"]:
                 rows3.append(("평균 근속", f"{e1['tenure']:.1f}년", None))
-            out.append(card("staff", "직원", value=f"{e1['count']:,}명", prev=f"1년 전 {e0['count']:,}명" if e0["count"] else None,
+            out.append(card("staff", "직원", value=f"{e1['count']:,}명", prev=f"{L['same_point']} {e0['count']:,}명" if e0["count"] else None,
                             change=change_text(e1["count"], e0["count"]), rows=rows3,
                             note=" ".join(x for x in (
                                 "반기·분기 급여는 그 기간 누적이라 연봉과 바로 비교하면 안 돼요." if reprt != "11011" else "",
                                 "1인 평균 급여는 보고서의 성별·부문별 1인 평균 급여액을 직원 수로 가중 평균한 값이라, 회사가 원문에 적은 전체 평균과 수십만 원 다를 수 있어요."
                                 if e1.get("avg_how") == "1인 평균 급여액 가중 평균" else "") if x) or None,
                             source="DART 정기보고서 주요정보 · 직원 현황", lines=[rp.block_first_line(parsed, "staff_people")],
-                            data=dict(now=e1, prev=e0)))
+                            data=dict(now=e1, prev=e0, same_point=L["same_point"], prev_label=L["prev"])))
         # 4) 최고 보수
         a1, b1 = api("hmvAuditIndvdlBySttus")[0], api("indvdlByPay")[0]
         top = top_pay(a1, b1)
@@ -830,14 +873,15 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                 rows5.append((f"최대주주 {h1['name']}", f"{h1['rate']}%", None))
             m1, m0 = minority_stats(api("mrhlSttus")[0]), minority_stats(api("mrhlSttus")[1])
             if m1 and m1["count"]:
-                rows5.append(("소액주주", f"{m1['count']:,}명" + (f" (1년 전 {m0['count']:,}명, {change_text(m1['count'], m0['count'])})" if m0 and m0["count"] else ""), None))
+                rows5.append(("소액주주", f"{m1['count']:,}명" + (f" ({L['same_point']} {m0['count']:,}명, {change_text(m1['count'], m0['count'])})" if m0 and m0["count"] else ""), None))
             base = h1["total0"] if h1["total0"] is not None else (h0["total"] if h0 else None)
             out.append(card("holder", "최대주주·특수관계인 지분 (보통주)", value=f"{h1['total']}%" if h1["total"] is not None else "-",
-                            prev=(f"기초 {base}%" if h1["total0"] is not None else f"1년 전 {base}%") if base is not None else None,
+                            prev=(f"{L['prev_end']} {base}%" if h1["total0"] is not None else f"{L['same_point']} {base}%") if base is not None else None,
                             change=change_text(h1["total"], base, pct=False) if h1["total"] is not None and base is not None else None,
                             rows=rows5,
                             source="DART 정기보고서 주요정보 · 최대주주 현황", lines=[rp.block_first_line(parsed, "holder")],
-                            data=dict(h=h1, base=base, base_kind="기초" if h1["total0"] is not None else "1년 전", m1=m1, m0=m0)))
+                            data=dict(h=h1, base=base, base_kind=L["prev_end"] if h1["total0"] is not None else L["same_point"], m1=m1, m0=m0,
+                                      same_point=L["same_point"])))
         # 6) 자사주·배당
         t1 = treasury_stats(api("tesstkAcqsDspsSttus")[0])
         d = dividend_stats(api("alotMatter")[0])
@@ -909,33 +953,38 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         financial = ("biz_fin_ops" in parsed["blocks"] and "biz_plant" not in parsed["blocks"]) or (
             f1["cash"] is None and f1["debt_ratio"] is not None and f1["debt_ratio"] > 500)  # 원문 없이도: 은행·지주는 현금 계정 없이 부채비율이 매우 높다
         if f1["liab"] is not None and f1["equity"] and not financial:
-            rows_d = [("부채총계", won_text(f1["liab"]), None), ("차입금(사채 포함)", won_text(f1["borrow"]) + (f" (전기말 {won_text(f0['borrow'])})" if f0["borrow"] else ""), None),
-                      ("현금및현금성자산", won_text(f1["cash"]) + (f" (전기말 {won_text(f0['cash'])})" if f0["cash"] else ""), None)]
+            rows_d = [("부채총계", won_text(f1["liab"]), None), ("차입금(사채 포함)", won_text(f1["borrow"]) + (f" ({L['prev_end']} {won_text(f0['borrow'])})" if f0["borrow"] else ""), None),
+                      ("현금및현금성자산", won_text(f1["cash"]) + (f" ({L['prev_end']} {won_text(f0['cash'])})" if f0["cash"] else ""), None)]
             rows_d = [r for r in rows_d if not (r[1] == "-" or r[1].startswith("- "))]
             if f1["net_borrow"] is not None:
                 rows_d.append(("순차입금(차입금-현금)", won_text(f1["net_borrow"]) if f1["net_borrow"] >= 0 else "순현금 " + won_text(-f1["net_borrow"]), None))
             out.append(card("debt", "부채비율·차입금·현금", value=f"부채비율 {f1['debt_ratio']:.1f}%",
-                            prev=f"전기말 {f0['debt_ratio']:.1f}%" if f0["debt_ratio"] is not None else None,
+                            prev=f"{L['prev_end']} {f0['debt_ratio']:.1f}%" if f0["debt_ratio"] is not None else None,
                             change=change_text(f1["debt_ratio"], f0["debt_ratio"], pct=False) if f0["debt_ratio"] is not None else None,
                             rows=rows_d, note="부채비율 = 부채총계 ÷ 자본총계. 차입금은 단기·장기차입금과 사채 계정을 더한 값(리스부채 제외).",
-                            source=f"DART 재무제표({fin['fs']}) · 재무상태표", data=dict(now=f1, prev=f0)))
+                            source=f"DART 재무제표({fin['fs']}) · 재무상태표", data=dict(now=f1, prev=f0, prev_end=L["prev_end"])))
 
-    # 8) R&D
+    # 8) R&D — 전년 동기 대비: 사업보고서는 표의 전기 칸, 분기·반기는 1년 전 같은 기간 보고서의 당기 칸
     r = rnd_ratio(parsed)
     if r:
+        r0 = rnd_ratio(prev_parsed) if prev_parsed else None
+        def base_of(k):
+            if r0 and r0.get(k):
+                return r0[k][0]
+            return r[k][1] if reprt == "11011" and r.get(k) else None
         rows8 = []
         if "cost" in r:
-            c, c0, no = r["cost"]
-            if reprt == "11011":
-                extra = f" (전기 {money_text(c0, r['unit'])}, {change_text(c, c0)})" if c0 else ""
-            else:  # 반기·분기 표의 둘째 칸은 직전 사업연도 전체라 증감을 내지 않는다
-                extra = f" (직전 사업연도 전체 {money_text(c0, r['unit'])})" if c0 else ""
-            rows8.append(("연구개발비", money_text(c, r["unit"]) + extra, no))
+            c, _, no = r["cost"]
+            c0 = base_of("cost")
+            rows8.append(("연구개발비", money_text(c, r["unit"]) + (f" ({L['prev']} {money_text(c0, r['unit'])}, {change_text(c, c0)})" if c0 else ""), no))
         ratio = r.get("ratio")
-        note8 = None if reprt == "11011" else "반기·분기 비율을 직전 사업연도 전체 비율과 비교한 값이에요."
-        out.append(card("rnd", "연구개발비 / 매출액", note=note8, value=f"{ratio[0]}%" if ratio else None, prev=(f"전기 {ratio[1]}%" if reprt == "11011" else f"직전 사업연도 {ratio[1]}%") if ratio and ratio[1] is not None else None,
-                        change=change_text(ratio[0], ratio[1], pct=False) if ratio and ratio[1] is not None else None,
-                        rows=rows8, lines=[ratio[2]] if ratio else [], source=rp.REPORT_BLOCK_LABELS["biz_rnd"], data=dict(r=r)))
+        b = base_of("ratio") if ratio else None
+        out.append(card("rnd", "연구개발비 / 매출액" + (f" · {L['title']}" if L["title"] else ""),
+                        note=None if b is not None or reprt == "11011" else "1년 전 같은 기간 보고서가 없어 비교하지 못했어요.",
+                        value=f"{ratio[0]}%" if ratio else None, prev=f"{L['prev']} {b}%" if b is not None else None,
+                        change=change_text(ratio[0], b, pct=False) if ratio and b is not None else None,
+                        rows=rows8, lines=[ratio[2]] if ratio else [], source=rp.REPORT_BLOCK_LABELS["biz_rnd"],
+                        data=dict(r=r, cost0=base_of("cost") if "cost" in r else None, ratio0=b)))
     # 9) 지역별 매출: 재무 주석 '지역에 대한 공시' 표 (당기·전기 같은 기간), 없으면 원문 줄
     reg = region_sales(parsed)
     if reg:
@@ -948,7 +997,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                 continue
             share = f"비중 {v / tot * 100:.1f}%" if tot else ""
             p0 = prev.get(name)
-            chg = f", {'전기' if reprt == '11011' else '1년 전 같은 기간'} 대비 {change_text(v, p0)}" if p0 else ""
+            chg = f", {L['prev']} 대비 {change_text(v, p0)}" if p0 else ""
             rows9.append((name, f"{money_text(v, reg['unit'])} · {share}{chg}", reg["line_now"]))
         top = max((x for x in reg["now"] if x[0] != "합계"), key=lambda x: x[1])
         out.append(card("region", "지역별 매출 (연결)", value=f"{top[0]} {top[1] / tot * 100:.1f}%" if tot else top[0],

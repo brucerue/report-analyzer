@@ -97,7 +97,11 @@ def show_cards(parsed, corp_code, row, session, cache, key):
 
     def fin_api():
         frows, fs = pt.fetch_fin(lambda url, params: dc.call_dart(session, url, params), cache, key, corp_code, year, reprt)
-        return dict(pt.fin_stats(frows), fs=fs) if frows else None
+        out = dict(pt.fin_stats(frows), fs=fs) if frows else None
+        if out and reprt in ("11012", "11013", "11014"):
+            out["prevq"] = pt.prev_quarter(lambda y, r: pt.fetch_fin(lambda url, params: dc.call_dart(session, url, params), cache, key, corp_code, y, r)[0], year, reprt)
+            print("  직전 분기:", out["prevq"])
+        return out
 
     print("--- 기사 포인트 카드 ---")
     for c in pt.build_cards(parsed, None, api if year and corp_code else None, reprt or "11011", fin_api if year and corp_code else None):

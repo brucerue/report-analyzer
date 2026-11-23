@@ -16,7 +16,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 20:16"
+LAST_UPDATED = "2026.11.23 20:40"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -294,13 +294,22 @@ def fin_api():
         except dc.DartApiError:
             frows, fs = [], None
         memo["fin"] = dict(pt.fin_stats(frows), fs="연결" if fs == "CFS" else "별도") if frows else None
+        if memo["fin"] and reprt in ("11012", "11013", "11014"):  # 직전 분기 3개월 (QoQ)
+            def rows_of(y, r):
+                try:
+                    return pt.fetch_fin(lambda url, params: dc.call_dart(get_session(), url, params), get_cache(), DART_KEY,
+                                        corp["corp_code"], y, r)[0]
+                except dc.DartApiError:
+                    return []
+            memo["fin"]["prevq"] = pt.prev_quarter(rows_of, year, reprt)
     return memo["fin"]
 
 
 # ---------------- 기사 포인트: 1) DART 자료로 바로 나오는 카드 ----------------
 with tab_point:
     prev_row = dc.find_prev_periodic(rows, row)
-    ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 재무제표·구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
+    ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 재무제표·구조화 자료와 원문 표에서만 가져와요 (AI 없음). "
+            "비교 기준: 실적·시설투자·가동률·R&D 같은 기간 값은 전년 동기, 부채·현금·최대주주 지분은 지난해 말, 직원·소액주주는 1년 전 같은 시점, 분기 실적은 직전 분기도 함께.")
     with st.spinner("DART 자료로 숫자를 모으는 중..."):
         fast = pt.build_cards(None, None, api if year else None, reprt or "11011", fin_api if year else None, part="fast", period=PERIOD)
     if fast:

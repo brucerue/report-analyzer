@@ -106,6 +106,14 @@ def w_income(d, period, before, annual):
         ql = d.get("q_label") or "분기(3개월)"
         out.append(f"{ql}만 보면 영업이익은 {pt.won_text(qn['op'])}으로 지난해 같은 분기보다 {how}." if qn["op"] >= 0 and "전환" not in how
                    else f"{ql}만 보면 {_pl('영업', qn['op'])}을 내 {how}.")
+    pq, qn = d.get("prevq"), d.get("q_now")
+    if pq and qn and pq.get("op") is not None and qn.get("op") is not None:
+        how = _profit(qn["op"], pq["op"])
+        base = f"직전 분기인 {d.get('prevq_label') or '지난 분기'}"
+        if qn["op"] >= 0 and "전환" not in how:
+            out.append(f"{base}와 비교하면 영업이익이 {how}.")
+        else:
+            out.append(f"{base}와 비교하면 {how}.")
     return out
 
 
@@ -130,7 +138,7 @@ def w_consol(d, period, before, annual):
     s = f"연결 종속회사는 {d['count']:,}곳이다."
     if d.get("rows_prev"):
         diff = d["rows_now"] - d["rows_prev"]
-        s = f"연결 종속회사는 {d['count']:,}곳으로, 1년 전보다 {abs(diff)}곳 {'증가했다' if diff > 0 else '감소했다'}." if diff else s
+        s = f"연결 종속회사는 {d['count']:,}곳으로, {d.get('same_point') or '1년 전'}보다 {abs(diff)}곳 {'증가했다' if diff > 0 else '감소했다'}." if diff else s
     out = [s]
     if d.get("new"):
         names = ", ".join(d["new"][:3])
@@ -141,7 +149,7 @@ def w_consol(d, period, before, annual):
 def w_staff(d, period, before, annual):
     n, p = d["now"], d["prev"]
     out = []
-    s = f"직원 수는 {n['count']:,}명으로 {'1년 전' if annual else before}보다 {_chg(n['count'], p['count'])}." if p["count"] else f"직원 수는 {n['count']:,}명이다."
+    s = f"직원 수는 {n['count']:,}명으로 {d.get('same_point') or '1년 전'}보다 {_chg(n['count'], p['count'])}." if p["count"] else f"직원 수는 {n['count']:,}명이다."
     out.append(s)
     if n["avg"]:
         label = "1인 평균 급여는" if annual else f"{period} 1인 평균 급여(누적)는"
@@ -166,17 +174,18 @@ def w_holder(d, period, before, annual):
     out = []
     if h["total"] is not None:
         base = d.get("base")
+        bk = d["base_kind"]
         s = f"최대주주 {j(h['name'], '과/와')} 특수관계인의 보통주 지분율은 {h['total']}%"
         if base is None:
             s += "다."
         elif _pp(h["total"], base) == "같은 수준이었다":
-            s += f"로 {d['base_kind']}와 같았다."
+            s += f"로 {j(bk, '과/와')} 같았다."
         else:
-            s += f"로 {d['base_kind']}({base}%)보다 {_pp(h['total'], base)}."
+            s += f"로 {bk}({base}%)보다 {_pp(h['total'], base)}."
         out.append(s)
     m1, m0 = d.get("m1"), d.get("m0")
     if m1 and m1.get("count"):
-        out.append(f"소액주주는 {m1['count']:,}명으로 1년 전보다 {_chg(m1['count'], m0['count'])}." if m0 and m0.get("count") else f"소액주주는 {m1['count']:,}명이다.")
+        out.append(f"소액주주는 {m1['count']:,}명으로 {d.get('same_point') or '1년 전'}보다 {_chg(m1['count'], m0['count'])}." if m0 and m0.get("count") else f"소액주주는 {m1['count']:,}명이다.")
     return out
 
 
@@ -221,7 +230,7 @@ def w_capex(d, period, before, annual):
 
 def w_debt(d, period, before, annual):
     n, p = d["now"], d["prev"]
-    out = [f"부채비율은 {n['debt_ratio']:.1f}%로 지난해 말({p['debt_ratio']:.1f}%)보다 {_pp(n['debt_ratio'], p['debt_ratio'])}."
+    out = [f"부채비율은 {n['debt_ratio']:.1f}%로 {d.get('prev_end') or '지난해 말'}({p['debt_ratio']:.1f}%)보다 {_pp(n['debt_ratio'], p['debt_ratio'])}."
            if p.get("debt_ratio") is not None else f"부채비율은 {n['debt_ratio']:.1f}%다."]
     if n.get("borrow") is not None:
         s = f"차입금(사채 포함)은 {pt.won_text(n['borrow'])}"
@@ -238,16 +247,17 @@ def w_rnd(d, period, before, annual):
     r = d["r"]
     out = []
     if "cost" in r:
-        c, c0, _ = r["cost"]
+        c = r["cost"][0]
+        c0 = d.get("cost0")
         v = pt.money_text(c, r["unit"])
         s = f"{period} 연구개발비는 {v}"
-        s += (f"으로 전년보다 {_chg(c, c0)}." if annual and c0 else "이다.")
+        s += (f"으로 {before}보다 {_chg(c, c0)}." if c0 else "이다.")
         out.append(s.replace(f"{v}으로", j(v, "으로/로")))
     ratio = r.get("ratio")
     if ratio:
-        if ratio[1] is not None:
-            base = "전년" if annual else "직전 사업연도"
-            out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%로 {base}({ratio[1]}%)보다 {_pp(ratio[0], ratio[1])}.")
+        b = d.get("ratio0")
+        if b is not None:
+            out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%로 {before}({b}%)보다 {_pp(ratio[0], b)}.")
         else:
             out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%다.")
     return out
