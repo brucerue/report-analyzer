@@ -116,19 +116,22 @@ def block_lines(parsed, name):
 def invest_changes(parsed):
     """XII-3 타법인출자 현황(상세) -> (변동 목록, 금액 단위, 주식 단위). 변동 = 취득·처분이 있었던 법인.
     표준 서식 16칸: 법인명·상장·최초취득일·목적·최초취득금액·기초(수량·지분율·장부)·증감(수량·금액·평가손익)·기말(수량·지분율·장부)·총자산·순손익"""
-    rows, money, shares = [], None, None
+    rows, money, shares, seen = [], None, None, 0
     for no, t in block_lines(parsed, "detail_invest"):
         if money is None and "단위" in t:
             money, shares = unit_of(t)
         c = cells(t)
         if len(c) != 16 or c[1].replace(" ", "") not in ("상장", "비상장"):
             continue
+        seen += 1
         q0, q_chg, amt, q1 = to_num(c[5]), to_num(c[8]), to_num(c[9]), to_num(c[11])
+        b0, b1 = to_num(c[7]), to_num(c[13])
         if not q_chg and not amt:
             continue  # 평가손익만 바뀐 것은 뺀다
-        if not q0 and q1:
+        had, has = bool(q0 or b0), bool(q1 or b1)  # 수량 칸이 '-'인 조합·투자주식은 장부가로 판단
+        if not had and has:
             kind = "신규 취득"
-        elif q0 and not q1:
+        elif had and not has:
             kind = "전량 처분"
         elif (q_chg or 0) > 0 or (amt or 0) > 0:
             kind = "추가 취득"
@@ -137,6 +140,7 @@ def invest_changes(parsed):
         rows.append(dict(line=no, name=c[0], kind=kind, purpose=c[3], qty_change=q_chg, amount=amt,
                          rate0=c[6], rate1=c[12], book1=to_num(c[13])))
     rows.sort(key=lambda r: -abs(r["amount"] or 0))
+    invest_changes.seen = seen  # 읽은 표준 행 수 (카드 안내문용)
     return rows, money, shares
 
 
@@ -455,7 +459,10 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         out.append(card("invest", "타법인 출자 변동", value=f"{len(rows)}곳", note="취득·처분 금액이 큰 순 (평가손익만 바뀐 곳은 뺌)",
                         rows=lines, source=f"{rp.REPORT_BLOCK_LABELS['detail_invest']} · 단위 {money or '?'}"))
     elif "detail_invest" in parsed["blocks"]:
-        out.append(card("invest", "타법인 출자 변동", empty="이번 기간에 취득·처분한 출자가 없거나 표 모양을 읽지 못했어요."))
+        n = getattr(invest_changes, "seen", 0)
+        msg = (f"출자 {n}곳을 확인했는데, 이번 기간에 취득·처분한 곳은 없어요 (평가손익만 바뀐 곳은 뺐어요)." if n
+               else "타법인출자 표의 모양을 읽지 못했어요. '목차별 보기 > XII. 상세표'에서 원문을 확인하세요.")
+        out.append(card("invest", "타법인 출자 변동", empty=msg))
 
     # 2) 종속회사
     names, summary = consol_list(parsed)
