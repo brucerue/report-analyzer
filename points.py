@@ -488,8 +488,13 @@ def income_stats(rows):
     has_add = any(str(r.get("thstrm_add_amount") or "").strip() not in ("", "-") for r in rows if r.get("sj_div") in ("IS", "CIS"))
     out = {"cum": {"now": get("thstrm_amount", "thstrm_add_amount"), "prev": get("frmtrm_amount", "frmtrm_add_amount")}, "qtr": None}
     if has_add:
-        out["qtr"] = {"now": get("thstrm_amount"), "prev": get("frmtrm_amount")}
+        out["qtr"] = {"now": get("thstrm_amount"), "prev": get("frmtrm_amount", "frmtrm_q_amount")}  # 전년 같은 분기는 frmtrm_q_amount
     return out
+
+
+def signed(v, loss_word):
+    """줄 이름이 이미 '순이익'일 때: 흑자면 금액만, 적자면 '순손실 810억원'."""
+    return f"{loss_word} {won_text(abs(v))}" if v < 0 else won_text(v)
 
 
 def pl_text(kind, v):
@@ -706,13 +711,13 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None):
             margin = n["op"] / n["rev"] * 100 if n["op"] is not None and n["rev"] else None
             pmargin = p["op"] / p["rev"] * 100 if p["op"] is not None and p["rev"] else None
             rows0 = [(f"매출{span}", won_text(n["rev"]) + (f" (전년 같은 기간 {won_text(p['rev'])}, {change_text(n['rev'], p['rev'])})" if p["rev"] else ""), None),
-                     (f"순이익{span}", (pl_text("순", n["net"]) if n["net"] is not None else "-") + (f" ({profit_change(n['net'], p['net'])})" if p["net"] is not None and n["net"] is not None else ""), None)]
+                     (f"순이익{span}", (signed(n["net"], "순손실") if n["net"] is not None else "-") + (f" ({profit_change(n['net'], p['net'])})" if p["net"] is not None and n["net"] is not None else ""), None)]
             if margin is not None:
                 rows0.append(("영업이익률", f"{margin:.1f}%" + (f" (전년 같은 기간 {pmargin:.1f}%)" if pmargin is not None else ""), None))
             if qtr and (qtr["now"]["rev"] is not None or qtr["now"]["op"] is not None):
                 q, qp = qtr["now"], qtr["prev"]
                 rows0.append(("이번 분기(3개월) 매출", won_text(q["rev"]) + (f" ({change_text(q['rev'], qp['rev'])})" if qp["rev"] else ""), None))
-                rows0.append(("이번 분기(3개월) 영업이익", (pl_text("영업", q["op"]) if q["op"] is not None else "-") + (f" ({profit_change(q['op'], qp['op'])})" if qp["op"] is not None and q["op"] is not None else ""), None))
+                rows0.append(("이번 분기(3개월) 영업이익", (signed(q["op"], "영업손실") if q["op"] is not None else "-") + (f" ({profit_change(q['op'], qp['op'])})" if qp["op"] is not None and q["op"] is not None else ""), None))
             rows0 = [r for r in rows0 if not (r[1] == "-" or r[1].startswith("- "))]  # 값 없음만 숨김 (마이너스 숫자는 남김)
             out.append(card("income", f"실적{span}", value=pl_text("영업", n["op"]) if n["op"] is not None else None,
                             prev=f"전년 같은 기간 {pl_text('영업', p['op'])}" if p["op"] is not None else None,

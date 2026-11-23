@@ -236,7 +236,7 @@ def test_income():
         {"sj_div": "CIS", "account_id": "ifrs-full_Revenue", "account_nm": "매출액", "thstrm_amount": "46,000", "thstrm_add_amount": "140,000",
          "frmtrm_amount": "43,000", "frmtrm_add_amount": "130,000"},
         {"sj_div": "CIS", "account_id": "dart_OperatingIncomeLoss", "account_nm": "영업이익", "thstrm_amount": "2,000", "thstrm_add_amount": "9,000",
-         "frmtrm_amount": "-1,000", "frmtrm_add_amount": "10,000"},
+         "frmtrm_amount": "40,000", "frmtrm_q_amount": "-1,000", "frmtrm_add_amount": "10,000"},
         {"sj_div": "CIS", "account_id": "x", "account_nm": "분기순손실", "thstrm_amount": "500", "thstrm_add_amount": "1,200",
          "frmtrm_amount": "-300", "frmtrm_add_amount": "2,000"}]
     inc = pt.income_stats(q3)
@@ -249,7 +249,7 @@ def test_income():
     loss = dict(pt.fin_stats([dict(r, thstrm_add_amount="", frmtrm_add_amount="", thstrm_amount=r["thstrm_amount"].replace("2,000", "-34,000000000").replace("46,000", "2531000000000").replace("500", "-81000000000"),
                                    frmtrm_amount=r["frmtrm_amount"].replace("-1,000", "112000000000").replace("43,000", "2774000000000").replace("-300", "54000000000")) for r in q3]), fs="연결")
     lc = {x["key"]: x for x in pt.build_cards(None, None, None, fin_api=lambda: loss, part="fast")}["income"]
-    check(lc["value"] == "영업손실 340억원" and lc["change"] == "적자 전환" and any(r[0] == "순이익" and r[1].startswith("순이익 810억원") is False and "순손실 810억원" in r[1] for r in lc["rows"])
+    check(lc["value"] == "영업손실 340억원" and lc["change"] == "적자 전환" and any(r[0] == "순이익" and r[1].startswith("순손실 810억원") for r in lc["rows"])
           and any(r[0] == "영업이익률" and r[1].startswith("-1.3%") for r in lc["rows"]), "적자: '영업손실 ○억원', 마이너스 줄도 보임")
     yr = pt.income_stats([dict(r, thstrm_add_amount="", frmtrm_add_amount="") for r in q3])
     check(yr["qtr"] is None and yr["cum"]["now"]["rev"] == 46000, "사업보고서(누적 칸 없음)")
