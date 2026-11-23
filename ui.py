@@ -206,7 +206,7 @@ def cards(items):
                 body.append(f'<div class="val">{esc(c["value"])}</div>')
             cmp = []
             if c.get("prev"):
-                cmp.append(f"비교 {esc(c['prev'])}")
+                cmp.append(esc(c["prev"]))
             if c.get("change"):
                 cmp.append(f"<b>{esc(c['change'])}</b>")
             if cmp:

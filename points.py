@@ -423,7 +423,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         said = stated_count(summary)
         if said and said != len(names):
             note = (note + " " if note else "") + f"표의 행은 {len(names)}곳이에요 (보고서 문장의 숫자를 위에 적었어요)."
-        out.append(card("consol", "연결 종속회사", value=f"{said or len(names)}곳", prev=f"{len(prev_names)}곳" if prev_names else None,
+        out.append(card("consol", "연결 종속회사", value=f"{said or len(names)}곳", prev=f"1년 전 표 {len(prev_names)}곳" if prev_names else None,
                         change=(f"{len(names) - len(prev_names):+d}곳 (표 행 기준)" if prev_names else None), note=note, rows=rows2,
                         source=rp.REPORT_BLOCK_LABELS["detail_consol"]))
 
@@ -435,7 +435,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
             rows3 = [("1인 평균 급여", f"{won_text(e1['avg'])}" + (f" (1년 전 {won_text(e0['avg'])}, {change_text(e1['avg'], e0['avg'])})" if e0['avg'] else ""), None)]
             if e1["tenure"]:
                 rows3.append(("평균 근속", f"{e1['tenure']:.1f}년", None))
-            out.append(card("staff", "직원", value=f"{e1['count']:,}명", prev=f"{e0['count']:,}명" if e0["count"] else None,
+            out.append(card("staff", "직원", value=f"{e1['count']:,}명", prev=f"1년 전 {e0['count']:,}명" if e0["count"] else None,
                             change=change_text(e1["count"], e0["count"]), rows=rows3,
                             note="반기·분기 급여는 그 기간 누적이라 연봉과 바로 비교하면 안 돼요." if reprt != "11011" else None,
                             source="DART 정기보고서 주요정보 · 직원 현황", lines=[rp.block_first_line(parsed, "staff_people")]))
@@ -457,9 +457,9 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
                 rows5.append(("소액주주", f"{m1['count']:,}명" + (f" (1년 전 {m0['count']:,}명, {change_text(m1['count'], m0['count'])})" if m0 and m0["count"] else ""), None))
             base = h1["total0"] if h1["total0"] is not None else (h0["total"] if h0 else None)
             out.append(card("holder", "최대주주·특수관계인 지분 (보통주)", value=f"{h1['total']}%" if h1["total"] is not None else "-",
-                            prev=f"{base}%" if base is not None else None,
+                            prev=(f"기초 {base}%" if h1["total0"] is not None else f"1년 전 {base}%") if base is not None else None,
                             change=change_text(h1["total"], base, pct=False) if h1["total"] is not None and base is not None else None,
-                            rows=rows5, note="비교값은 같은 표의 기초 지분율이에요." if h1["total0"] is not None else None,
+                            rows=rows5,
                             source="DART 정기보고서 주요정보 · 최대주주 현황", lines=[rp.block_first_line(parsed, "holder")]))
         # 6) 자사주·배당
         t1 = treasury_stats(api("tesstkAcqsDspsSttus")[0])
@@ -496,7 +496,7 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
             rows8.append(("연구개발비", money_text(c, r["unit"]) + extra, no))
         ratio = r.get("ratio")
         note8 = None if reprt == "11011" else "반기·분기 비율을 직전 사업연도 전체 비율과 비교한 값이에요."
-        out.append(card("rnd", "연구개발비 / 매출액", note=note8, value=f"{ratio[0]}%" if ratio else None, prev=f"{ratio[1]}%" if ratio and ratio[1] is not None else None,
+        out.append(card("rnd", "연구개발비 / 매출액", note=note8, value=f"{ratio[0]}%" if ratio else None, prev=(f"전기 {ratio[1]}%" if reprt == "11011" else f"직전 사업연도 {ratio[1]}%") if ratio and ratio[1] is not None else None,
                         change=change_text(ratio[0], ratio[1], pct=False) if ratio and ratio[1] is not None else None,
                         rows=rows8, lines=[ratio[2]] if ratio else [], source=rp.REPORT_BLOCK_LABELS["biz_rnd"]))
     # 9) 지역별 매출 (계산 안 함)

@@ -11,7 +11,17 @@ os.environ.setdefault("GEMINI_API_KEY", "TEST")
 import analyses as an
 import dart_client as dc
 import points as pt
-pt.fetch_api = lambda *a, **k: None  # 가짜: DART 구조화 자료 없음
+FAKE_API = {  # 가짜 DART 구조화 자료 (이름: (올해, 1년 전))
+    "empSttus": ({"list": [{"fo_bbm": "전지", "sexdstn": "남", "sm": "1,050", "fyer_salary_totamt": "68,250,000,000", "avrg_cnwk_sdytrn": "5.1"},
+                           {"fo_bbm": "전지", "sexdstn": "여", "sm": "142", "fyer_salary_totamt": "6,000,000,000", "avrg_cnwk_sdytrn": "3.2"}]},
+                 {"list": [{"fo_bbm": "전지", "sexdstn": "남", "sm": "1,219", "fyer_salary_totamt": "76,350,000,000"}]}),
+    "hyslrSttus": ({"list": [{"nm": "가나홀딩스", "relate": "최대주주 본인", "stock_knd": "보통주", "bsis_posesn_stock_qota_rt": "45.12", "trmend_posesn_stock_qota_rt": "40.84"},
+                             {"nm": "계", "stock_knd": "보통주", "bsis_posesn_stock_qota_rt": "50.33", "trmend_posesn_stock_qota_rt": "45.59"}]}, None),
+    "mrhlSttus": ({"list": [{"shrholdr_co": "523,088"}]}, {"list": [{"shrholdr_co": "552,620"}]}),
+    "hmvAuditIndvdlBySttus": ({"list": [{"nm": "홍길동", "ofcps": "사장", "mendng_totamt": "7,305,000,000"}, {"nm": "부사장\n김철수", "ofcps": "부사장", "mendng_totamt": "743,000,000"}]}, None),
+    "alotMatter": ({"list": [{"se": "현금배당금총액(백만원)", "thstrm": "9,782", "frmtrm": "7,000"}, {"se": "주당 현금배당금(원)", "stock_knd": "보통주", "thstrm": "100", "frmtrm": "70"}]}, None),
+}
+pt.fetch_api = lambda call, cache, key, api, corp_code, year, reprt: FAKE_API.get(api, (None, None))[0 if year >= 2025 else 1]
 from test_core import fake_report
 
 ROWS = [{"rcept_no": "20260401000002", "rcept_dt": "20260401", "report_nm": "[기재정정]사업보고서 (2025.12)"},
