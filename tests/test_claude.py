@@ -50,6 +50,20 @@ def test_errors():
     print("ok - 거절·키·한도 안내")
 
 
+
+def test_meter_cost():
+    res = NS(stop_reason="end_turn", model="claude-sonnet-5-5", usage=NS(input_tokens=10000, output_tokens=3000, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+             content=[NS(type="text", text="본문")])
+    m = []
+    f = Fake(res)
+    claude_ai.call_claude("k", "p", "s", model="claude-sonnet-5-5", client=f, meter=m)
+    tin, tout, won = claude_ai.cost_won(m)
+    assert (tin, tout) == (10000, 3000) and abs(won - (10000 * 2 + 3000 * 10) / 1e6 * 1400) < 0.01, won
+    fh = Fake(NS(stop_reason="end_turn", content=[NS(type="text", text="x")]))
+    claude_ai.call_claude("k", "p", "s", model="claude-haiku-5-5", client=fh)
+    assert "fallbacks" not in fh.kw, "Haiku엔 서버 대체(fallbacks) 안 붙임"
+    print("ok - 실제 사용량 -> 원, Haiku는 fallbacks 없음")
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

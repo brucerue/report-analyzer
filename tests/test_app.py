@@ -160,8 +160,18 @@ print("ok - 점검에서 한도에 걸려도 첫 초안은 보임")
 os.environ["ANTHROPIC_API_KEY"] = "TEST"
 import claude_ai
 used = []
-claude_ai.call_claude = lambda key, prompt, system, model=None: (used.append(1) or
-                                                                 ("제목: 가나전지 실적\n\nClaude 초안 9조원." if len(used) == 1 else "제목: 가나전지 실적\n\nClaude 점검본 9조원.\n\n[고친 곳]\n- 없음"))
+models_used = []
+
+
+def fake_claude(key, prompt, system, model=None, meter=None):
+    used.append(1)
+    models_used.append(model)
+    if meter is not None:
+        meter.append((model, 10000, 2000))
+    return "제목: 가나전지 실적\n\nClaude 초안 9조원." if len(used) == 1 else "제목: 가나전지 실적\n\nClaude 점검본 9조원.\n\n[고친 곳]\n- 없음"
+
+
+claude_ai.call_claude = fake_claude
 at.run()
 eng = at.radio(key="f_engine")
 assert any(o.startswith("Claude") for o in eng.options), eng.options
@@ -169,4 +179,13 @@ eng.set_value(next(o for o in eng.options if o.startswith("Claude"))).run()
 at.button(key="f_go").click().run()
 assert not at.exception, at.exception
 assert len(used) == 2 and "Claude 점검본" in " ".join(c.value for c in at.code), "Claude로 작성·점검"
-print("ok - Claude 키가 있으면 골라서 쓰기")
+assert models_used == ["claude-haiku-5-5"] * 2, models_used
+notes = " ".join(str(h.proto) for h in at.get("html")) + " ".join(m.value for m in at.markdown)
+assert "입력 20,000토큰" in notes and "약 6원" in notes, "실제 사용량·금액 표시 (Haiku: 2만×0.1+4천×0.5달러/100만 = 0.004달러 ≈ 6원)"
+used.clear(); models_used.clear()
+at.radio(key="f_cmodel").set_value(next(o for o in at.radio(key="f_cmodel").options if o.startswith("Sonnet"))).run()
+at.checkbox(key="f_skip").check().run()
+at.button(key="f_go").click().run()
+assert not at.exception, at.exception
+assert models_used == ["claude-sonnet-5-5"] and "Claude 초안" in " ".join(c.value for c in at.code), "점검 건너뛰면 한 번만"
+print("ok - Claude 키가 있으면 골라서 쓰기 (모델 선택·점검 건너뛰기·실제 금액)")

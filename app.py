@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 01:40"
+LAST_UPDATED = "2026.11.24 02:10"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -465,16 +465,24 @@ def render_frame(all_cards, picked, lead, rno):
     st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체)")
     ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요. "
             "작성 → 규칙 점검 두 번 AI를 부르고, 숫자는 고른 요소의 값과 대조해요.")
-    engines = (["Gemini (무료)"] if GEMINI_KEY else []) + (["Claude (유료 · 한 번에 수십 원)"] if CLAUDE_KEY else [])
+    engines = (["Gemini (무료)"] if GEMINI_KEY else []) + (["Claude (유료)"] if CLAUDE_KEY else [])
     if not engines:
         ui.note("Streamlit Secrets에 GEMINI_API_KEY(무료) 또는 ANTHROPIC_API_KEY(유료)를 넣으면 쓸 수 있어요.")
         return
     engine = st.radio("쓰는 AI", engines, horizontal=True, key="f_engine") if len(engines) > 1 else engines[0]
+    meter, cmodel, skip_check = [], None, False
+    if engine.startswith("Claude"):
+        import claude_ai
+        names = list(claude_ai.MODELS)
+        default = next((i for i, n in enumerate(names) if CLAUDE_MODEL and claude_ai.MODELS[n][0] == CLAUDE_MODEL), 0)
+        pick = st.radio("Claude 모델", names, index=default, horizontal=True, key="f_cmodel")
+        cmodel = claude_ai.MODELS[pick][0]
+        skip_check = st.checkbox("규칙 점검 건너뛰기 (AI를 한 번만 불러 비용 절반)", key="f_skip")
+    label = f"Claude · {pick}" if cmodel else engine
 
     def ask(prompt, system):
         if engine.startswith("Claude"):
-            import claude_ai
-            return claude_ai.call_claude(CLAUDE_KEY, prompt, system, model=CLAUDE_MODEL)
+            return claude_ai.call_claude(CLAUDE_KEY, prompt, system, model=cmodel, meter=meter)
         return an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
     try:
         style = sty.load(get_session(), STYLE_TOKEN)
@@ -495,14 +503,20 @@ def render_frame(all_cards, picked, lead, rno):
             except an.AiError as e:
                 first = None
                 st.error(str(e))
-            if first:
+            if first and skip_check:
+                st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, engine=label, skipped=True)
+            elif first:
                 try:
                     system2, prompt2 = art.check_prompt(style["rules"], first)
                     body, fixes = art.split_check(ask(prompt2, system2))
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src, engine=engine)
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src, engine=label)
                 except an.AiError as e:  # 점검에서 한도에 걸려도 첫 초안은 살린다
                     st.warning(f"규칙 점검은 못 했어요 — {e} 아래는 점검 전 첫 초안이에요.")
                     st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True, engine=engine)
+            if meter and st.session_state.get("f_out", {}).get("rno") == rno:
+                tin, tout, won = claude_ai.cost_won(meter)
+                st.session_state["f_out"]["cost"] = (f"이번 실행 실제 사용량: 입력 {tin:,}토큰 · 출력 {tout:,}토큰 (생각한 분량 포함)"
+                                                     + (f" · 약 {won:,.0f}원 (1달러={claude_ai.WON_PER_DOLLAR:,}원 어림)" if won is not None else ""))
     out = st.session_state.get("f_out")
     if out and out["rno"] == rno:
         n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
@@ -514,6 +528,10 @@ def render_frame(all_cards, picked, lead, rno):
             ui.note("틀의 숫자는 모두 숫자 자료에 있어요.")
         st.html(marked(out["body"]))
         st.code(out["body"], language=None, wrap_lines=True)
+        if out.get("cost"):
+            ui.note(out["cost"])
+        if out.get("skipped"):
+            ui.note("규칙 점검을 건너뛴 첫 초안이에요.")
         if out.get("unchecked"):
             ui.note("규칙 점검 전 초안이에요. 한도가 풀리면 '틀 만들기'를 다시 누르면 점검까지 해요.")
         with st.expander(f"규칙 점검에서 고친 곳 ({len(out['fixes'])})"):
