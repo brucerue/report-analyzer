@@ -604,9 +604,10 @@ def material_table(parsed):
     lines = block_lines(parsed, "biz_plant")
     start, unit = None, None
     for i, (no, t) in enumerate(lines):
-        if "단위" in t:
-            unit = unit_of(t)[0] or unit or (re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t) or [None, None])[1]
         if "|" in t and "매입액" in t and start is None:
+            for _, t0 in lines[max(0, i - 15):i]:  # 표 바로 위 '(단위 : 백만원)' (멀리 있는 다른 표 단위는 쓰지 않음)
+                if "단위" in t0:
+                    unit = unit_of(t0)[0] or (re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t0) or [None, None])[1] or unit
             start = i
             m = re.search(r"매입(?:액|금액)\s*\(\s*(?:단위\s*[:：]?\s*)?(억원|백만원|천원|원)", t)
             unit = m.group(1) if m else unit
@@ -639,8 +640,9 @@ def material_table(parsed):
     if total is None and not items:
         return None
     items.sort(key=lambda x: -(x[1] or 0))
-    if not unit:  # 표 뒤 주석 줄 '(단위 : 백만원)' 등
-        for no, t in lines[start:start + 60]:
+    if not unit:  # 표 바로 뒤 주석 줄 '※ 단위 : 백만원' (표 끝에서 3줄까지만)
+        end = next((k for k in range(start + 1, len(lines)) if "|" not in lines[k][1]), len(lines))
+        for no, t in lines[end:end + 3]:
             m = re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t)
             if m:
                 unit = m.group(1)
@@ -652,7 +654,7 @@ def item_name(texts):
     """원재료 표 이름 칸 -> 기사용 이름: ['원재료', '양극재, 음극재,분리막 등', '전지 원재료'] -> '양극재, 음극재,분리막 등(전지 원재료)'."""
     xs = [x for x in texts if not re.fullmatch(r"(원재료|원자재|상품|부재료|자재)(\s*등)?|기\s*타", re.sub(r"\s+", " ", x).strip())]
     xs = xs or texts
-    return xs[0] if len(xs) == 1 else f"{xs[-2]}({xs[-1]})" if len(xs) >= 2 else ""
+    return xs[0] if len(xs) == 1 else xs[-2] if len(xs) >= 2 else ""  # 품목 칸 (용도 칸은 뺌)
 
 
 def to_won(v, unit):
@@ -934,10 +936,11 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         for r in ranked[:6]:
             before = f"{r['prev_rate']:.1f}% → " if r["prev_rate"] is not None else ""
             rows7.append((plant.label(r), f"{before}{r['rate']:.1f}%" + (f" ({plant.pp(r['diff'])})" if r["diff"] is not None else ""), r["line"]))
-        out.append(card("plant", "가동률" + (f" · {main['label']}" if main["label"] else "") + (f" · {L['title']}" if L["title"] else ""), value=f"{now['rate']:.1f}%",
-                        prev=f"{L['prev']} {main['prev']['rate']:.1f}%" if main["prev"] else None,
-                        change=plant.pp(now["rate"] - main["prev"]["rate"]) if main["prev"] else None, rows=rows7,
-                        note=f"{now['n']}곳 합산 = 생산실적 합 ÷ 생산능력 합 (단위 {main['unit']}). 공장별은 보고서에 적힌 가동률. 하락 폭 큰 순.",
+        out.append(card("plant", "가동률" + (f" · {main['label']}" if main["label"] else "") + (f" · {L['title']}" if L["title"] else ""), value=f"{now['rate']:.1f}%" if now["rate"] is not None else None,
+                        prev=f"{L['prev']} {main['prev']['rate']:.1f}%" if main["prev"] and main["prev"]["rate"] is not None and now["rate"] is not None else None,
+                        change=plant.pp(now["rate"] - main["prev"]["rate"]) if main["prev"] and main["prev"]["rate"] is not None and now["rate"] is not None else None, rows=rows7,
+                        note=(f"{now['n']}곳 합산 = 생산실적 합 ÷ 생산능력 합 (단위 {main['unit']}). " if now["rate"] is not None else
+                              "줄마다 능력·실적 단위가 달라 합산하지 않았어요. ") + "공장별은 보고서에 적힌 가동률. 하락 폭 큰 순.",
                         source=rp.REPORT_BLOCK_LABELS["biz_plant"], data=dict(set=main)))
     if hits:
         out.append(card("plant", "가동률 (원문 줄)", rows=[("", t, no) for no, t in hits],
@@ -993,9 +996,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
     # 8) R&D — 전년 동기 대비: 사업보고서는 표의 전기 칸, 분기·반기는 1년 전 같은 기간 보고서의 당기 칸
     r = rnd_ratio(parsed)
     if r and r.get("ratio") and not (0 <= r["ratio"][0] <= 100):
-        r.pop("ratio")  # 음수·100% 넘는 비율은 다른 줄을 잘못 읽은 것 (이마트 -0.5%)
-    if r and not r.get("ratio") and "cost" in r and r["cost"][0] is not None and r["cost"][0] < 0:
-        r = None
+        r = None  # 음수·100% 넘는 비율이면 표를 잘못 읽은 것 — 금액도 믿지 않는다 (이마트 -0.5%, 2조7664억원)
     if r:
         r0 = rnd_ratio(prev_parsed) if prev_parsed else None
         def base_of(k):

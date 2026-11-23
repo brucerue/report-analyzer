@@ -60,7 +60,7 @@ def rate_rows(parsed):
         if any(re.sub(r"\s+", "", x) in TOTAL_WORDS for x in texts):
             continue
         name = clean_name(texts[0])
-        place = clean_name(texts[1]) if len(texts) > 1 else ""
+        place = clean_name(texts[1]) if len(texts) > 1 and not re.search(r"[:：]", texts[1]) else ""  # '국내: 여수, 나주…' 같은 설명은 소재지로 쓰지 않음
         if re.fullmatch(r"(평균)?가동률(\(%\))?", re.sub(r"\s+", "", name)):
             name = group or "전체"
         key = (re.sub(r"\s+", "", group), re.sub(r"\s+", "", name), re.sub(r"\s+", "", place))
@@ -74,10 +74,16 @@ def total(rows, prev=False):
     k = "prev_" if prev else ""
     cap, prod = sum(r[k + "cap"] for r in rows), sum(r[k + "prod"] for r in rows)
     rate = rows[0][k + "rate"] if len(rows) == 1 else (prod / cap * 100 if cap else None)
+    if len(rows) > 1:  # 능력·실적 단위가 줄마다 다르면(한전 MW·MWh 등) 합산이 의미 없음: 실적÷능력이 보고서 가동률과 크게 다르면 합산하지 않음
+        for r in rows:
+            c, p_, rep = r[k + "cap"], r[k + "prod"], r[k + "rate"]
+            if not c or rep is None or abs(p_ / c * 100 - rep) > 10:
+                rate = None
+                break
     return dict(cap=cap, prod=prod, rate=rate, n=len(rows))
 
 
-NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지|용수|폐기물")
+NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지|용수|폐기물|비\s*용|단\s*가|원\s*/")
 
 
 def clean_name(x):
@@ -193,7 +199,7 @@ def sentences(st, period_text="이번 기간", annual=False):
 
     subject = f"{period_text} {now['n']}개 {noun}의 전체 가동률은" if now and now["n"] > 1 else (
         f"{period_text} {josa(label(rows[0]), '은/는')} 가동률" if rows else "")
-    if now and prev and prev["rate"] is not None:
+    if now and prev and prev["rate"] is not None and now["rate"] is not None:
         if now["n"] > 1:
             out.append(f"{subject} {now['rate']:.1f}%로 {before}({prev['rate']:.1f}%){move(now['rate'], prev['rate']).replace('과 같았다', '과 같았다')}."
                        .replace(f"{before}({prev['rate']:.1f}%)과", f"{before}({prev['rate']:.1f}%)과"))
@@ -206,7 +212,7 @@ def sentences(st, period_text="이번 기간", annual=False):
                        f"{'증가' if pc >= 0 else '감소'}했다.")
         if has_place and now["n"] > 1:
             for name, a, b in (("국내", st["now_dom"], st["prev_dom"]), ("해외", st["now_abr"], st["prev_abr"])):
-                if a and b and b["rate"] is not None:
+                if a and b and b["rate"] is not None and a["rate"] is not None:
                     n = f" {a['n']}개 공장의 합산" if a["n"] > 1 else " 공장"
                     d = a["rate"] - b["rate"]
                     tail = f"{pp(d)}했다" if round(d, 1) else "같았다"

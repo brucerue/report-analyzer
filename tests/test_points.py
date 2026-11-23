@@ -331,9 +331,17 @@ def test_sweep_fixes():
            "기 타 | 기 타 | - | 20,000 | 30.0% |\n"
            "합계 | 68,587 | 100.0% |\n\nV. 회계감사인의 감사의견 등\nx\n")
     m = pt.material_table(rp.parse_report(mat))
-    check(m["unit"] == "억원" and m["items"][0][4] == "편광판(패널)" and len(m["items"]) == 1, "원재료: '매입액(억원)' 단위, '기 타' 뺌, 기사용 이름 (LG디스플레이)")
+    check(m["unit"] == "억원" and m["items"][0][4] == "편광판" and len(m["items"]) == 1, "원재료: '매입액(억원)' 단위, '기 타' 뺌, 기사용 이름은 품목 칸 (LG디스플레이)")
     c = {x["key"]: x for x in pt.build_cards(rp.parse_report(mat.replace("(억원)", "")), None, None)}["material"]
     check(not c["sentences"] and "단위를 찾지 못해" in c["note"], "단위를 모르면 문장을 만들지 않음 (대한항공)")
+    mixed = ("II. 사업의 내용\n3. 원재료 및 생산설비\n(단위 : MW, MWh)\n"
+             "사업부문 | 품목 | 능력 | 실적 | 가동률 |\n"
+             "발전 | 원자력 | 1,000 | 7,000,000 | 85.6% |\n"
+             "발전 | 석탄 | 2,000 | 12,000,000 | 70.0% |\n"
+             "V. 회계감사인의 감사의견 등\nx\n")
+    pc = {x["key"]: x for x in pt.build_cards(rp.parse_report(mixed), None, None)}["plant"]
+    check(pc["value"] is None and "합산하지 않았어요" in pc["note"] and not any("전체 가동률" in x for x in pc["sentences"]),
+          "능력·실적 단위가 달라 합산이 안 맞으면 합산하지 않음 (한전 1914%)")
     neg = REPORT.replace("{x}", "").replace("| 2.5% |", "| -0.5% |")
     r = {x["key"]: x for x in pt.build_cards(rp.parse_report(neg), None, None)}.get("rnd")
     check(r is None or r["value"] is None, "음수 R&D 비율은 버림 (이마트)")
