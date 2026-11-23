@@ -138,6 +138,24 @@ def test_region():
     check(c["value"] == "미주 39.9%" and any(r[0] == "미주" and "133조2748억원" in r[1] and "12.2% 증가" in r[1] for r in c["rows"]), "지역별 매출 카드 (비중·전기 대비)")
 
 
+def test_employee_real_shapes():
+    sam = {"list": [  # 삼성전자 2025 사업보고서 empSttus 그대로 ('성별합계' 줄이 섞임)
+        {"fo_bbm": "DX", "sexdstn": "남", "sm": "38,119", "avrg_cnwk_sdytrn": "      17.4", "fyer_salary_totamt": "-", "jan_salary_am": "-"},
+        {"fo_bbm": "DX", "sexdstn": "여", "sm": "12,698", "avrg_cnwk_sdytrn": "      14.4", "fyer_salary_totamt": "-", "jan_salary_am": "-"},
+        {"fo_bbm": "DS", "sexdstn": "남", "sm": "56,154", "avrg_cnwk_sdytrn": "      11.7", "fyer_salary_totamt": "-", "jan_salary_am": "-"},
+        {"fo_bbm": "DS", "sexdstn": "여", "sm": "21,910", "avrg_cnwk_sdytrn": "      12.1", "fyer_salary_totamt": "-", "jan_salary_am": "-"},
+        {"fo_bbm": "성별합계", "sexdstn": "남", "sm": "94,273", "avrg_cnwk_sdytrn": "      14.0", "fyer_salary_totamt": "15,562,454,000,000", "jan_salary_am": "167,000,000"},
+        {"fo_bbm": "성별합계", "sexdstn": "여", "sm": "34,608", "avrg_cnwk_sdytrn": "      13.0", "fyer_salary_totamt": "4,237,308,000,000", "jan_salary_am": "130,000,000"}]}
+    e = pt.employee_stats(sam)
+    check(e["count"] == 128881, "삼성전자: '성별합계' 줄을 두 번 세지 않음 (12만8881명)")
+    check(abs(e["avg"] - (167e6 * 94273 + 130e6 * 34608) / 128881) < 1 and e["avg_how"] == "1인 평균 급여액 가중 평균", "삼성전자: 합계 줄의 1인 평균 급여액 가중 평균")
+    hy = {"list": [
+        {"fo_bbm": "반도체", "sexdstn": "남", "sm": "23,037", "avrg_cnwk_sdytrn": "12.3", "fyer_salary_totamt": "4,376,624,000,000", "jan_salary_am": "198,000,000"},
+        {"fo_bbm": "반도체", "sexdstn": "여", "sm": "11,512", "avrg_cnwk_sdytrn": "15.7", "fyer_salary_totamt": "1,771,407,000,000", "jan_salary_am": "159,000,000"}]}
+    h = pt.employee_stats(hy)
+    check(h["count"] == 34549 and pt.won_text(h["avg"], man=True) == "1억8500만원", "SK하이닉스: 1억8500만원 (기사와 같음)")
+
+
 def test_api_cards():
     emp_now = {"list": [{"fo_bbm": "DX", "sexdstn": "남", "sm": "1,000", "fyer_salary_totamt": "158,000,000,000", "avrg_cnwk_sdytrn": "12.0"},
                         {"fo_bbm": "DX", "sexdstn": "여", "sm": "1,000", "fyer_salary_totamt": "158,000,000,000", "avrg_cnwk_sdytrn": "10.0"},

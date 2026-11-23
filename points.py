@@ -319,7 +319,9 @@ def dart_rows(jo, need):
 
 
 def is_total(text):
-    return str(text or "").replace(" ", "") in ("합계", "총계", "계", "전체", "소계")
+    """'합계'·'성별합계'·'총계'·'소계'·'계'·'전체' 같은 합계 칸 (삼성전자 2025: 사업부문 칸에 '성별합계')."""
+    t = str(text or "").replace(" ", "")
+    return t in ("계", "전체") or any(w in t for w in ("합계", "총계", "소계"))
 
 
 def parse_years(text):
@@ -328,22 +330,43 @@ def parse_years(text):
     return float(m.group(1)) + (int(m.group(2)) / 12 if m.group(2) else 0) if m else None
 
 
+def _weighted(rows, col, conv=to_num):
+    w = [(conv(r.get(col)), to_num(r.get("sm")) or 0) for r in rows]
+    w = [(v, n) for v, n in w if v is not None and n]
+    return sum(v * n for v, n in w) / sum(n for _, n in w) if w else None
+
+
 def employee_stats(jo):
-    """직원 현황 -> {count, avg(1인 평균 급여, 원), tenure}. 부문·성별 표에서 합계 줄은 빼고 더한다."""
-    rows = dart_rows(jo, ["sm", "fyer_salary_totamt"])
-    detail = [r for r in rows if not is_total(r.get("fo_bbm")) and not is_total(r.get("sexdstn"))]
-    if not detail:
-        detail = [r for r in rows if not is_total(r.get("fo_bbm"))]
-    if not detail:
-        detail = rows
-    count = sum(to_num(r.get("sm")) or 0 for r in detail)
-    total = sum(to_num(r.get("fyer_salary_totamt")) or 0 for r in detail)
-    out = {"count": count or None, "avg": total / count if count and total else None, "tenure": None}
-    w = [(parse_years(r.get("avrg_cnwk_sdytrn")), to_num(r.get("sm")) or 0) for r in detail]
-    w = [(y, n) for y, n in w if y is not None and n]
-    if w:
-        out["tenure"] = sum(y * n for y, n in w) / sum(n for _, n in w)
-    return out
+    """직원 현황 -> {count, avg(1인 평균 급여, 원), tenure, avg_how}.
+    - 직원 수: 합계 줄을 뺀 세부 줄의 합 (세부 줄이 없으면 합계 줄). 삼성전자처럼 '성별합계' 줄이 섞여도 두 번 세지 않는다.
+    - 1인 평균 급여: 보고서에 적힌 '1인 평균 급여액'(jan_salary_am)을 직원 수로 가중 평균 — 기사가 쓰는 값과 같은 방식
+      (SK하이닉스 2025: 남 1억9800만원·여 1억5900만원 -> 1억8500만원). 이 값이 비어 있는 줄은 건너뛰고,
+      어디에도 없으면 급여 총액 ÷ 직원 수."""
+    rows = dart_rows(jo, ["sm"])
+    if not rows:
+        return {"count": None, "avg": None, "tenure": None, "avg_how": None}
+    tot = [r for r in rows if is_total(r.get("fo_bbm")) or is_total(r.get("sexdstn"))]
+    detail = [r for r in rows if r not in tot]
+    grand = [r for r in tot if (is_total(r.get("fo_bbm")) or not str(r.get("fo_bbm") or "").strip())
+             and (is_total(r.get("sexdstn")) or not str(r.get("sexdstn") or "").strip())]
+    base = detail or tot
+    count = sum(to_num(r.get("sm")) or 0 for r in base) or None
+    if grand and to_num(grand[0].get("sm")) and not detail:
+        count = to_num(grand[0].get("sm"))
+    avg, how = None, None
+    if grand and to_num(grand[0].get("jan_salary_am")):
+        avg, how = to_num(grand[0]["jan_salary_am"]), "보고서 합계 값"
+    else:
+        for group in (detail, tot):  # 세부 줄에 값이 있으면 세부, 없으면 합계 줄(성별합계 등)로 가중 평균
+            if any(to_num(r.get("jan_salary_am")) for r in group):
+                avg, how = _weighted([r for r in group if to_num(r.get("jan_salary_am"))], "jan_salary_am"), "1인 평균 급여액 가중 평균"
+                break
+    if avg is None and count:
+        total = sum(to_num(r.get("fyer_salary_totamt")) or 0 for r in (detail if any(to_num(r.get("fyer_salary_totamt")) for r in detail) else tot))
+        if total:
+            avg, how = total / count, "급여 총액 ÷ 직원 수"
+    tenure = _weighted(detail, "avrg_cnwk_sdytrn", parse_years) or _weighted(tot, "avrg_cnwk_sdytrn", parse_years)
+    return {"count": count, "avg": avg, "tenure": tenure, "avg_how": how}
 
 
 def top_pay(*jos):
@@ -506,7 +529,10 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
                 rows3.append(("평균 근속", f"{e1['tenure']:.1f}년", None))
             out.append(card("staff", "직원", value=f"{e1['count']:,}명", prev=f"1년 전 {e0['count']:,}명" if e0["count"] else None,
                             change=change_text(e1["count"], e0["count"]), rows=rows3,
-                            note="반기·분기 급여는 그 기간 누적이라 연봉과 바로 비교하면 안 돼요." if reprt != "11011" else None,
+                            note=" ".join(x for x in (
+                                "반기·분기 급여는 그 기간 누적이라 연봉과 바로 비교하면 안 돼요." if reprt != "11011" else "",
+                                "1인 평균 급여는 보고서의 성별·부문별 1인 평균 급여액을 직원 수로 가중 평균한 값이라, 회사가 원문에 적은 전체 평균과 수십만 원 다를 수 있어요."
+                                if e1.get("avg_how") == "1인 평균 급여액 가중 평균" else "") if x) or None,
                             source="DART 정기보고서 주요정보 · 직원 현황", lines=[rp.block_first_line(parsed, "staff_people")]))
         # 4) 최고 보수
         a1, b1 = api("hmvAuditIndvdlBySttus")[0], api("indvdlByPay")[0]

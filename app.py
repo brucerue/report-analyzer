@@ -15,7 +15,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 16:32"
+LAST_UPDATED = "2026.11.23 16:37"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -165,6 +165,8 @@ def render_multi():
     ordered = sorted(rows, key=lambda r: (r.get(sort_key) is None, -(r.get(sort_key) or 0)))
     period = f"{res['year']}년 {res['kind']}"
     ui.note(f"{period} 기준 · 표 머리를 누르면 다시 정렬돼요 · 금액은 만원·억원")
+    if any(k in shown for k in ("pay", "pay_chg")):
+        ui.note("1인 평균 급여는 보고서의 성별·부문별 '1인 평균 급여액'을 직원 수로 가중 평균한 값이에요 (기사들이 쓰는 방식. 회사가 원문에 적은 전체 평균과 수십만 원 다를 수 있어요).")
     if res["kind"] != "사업보고서" and any(k in shown for k in ("pay", "pay_chg")):
         ui.note("반기·분기 급여는 그 기간 누적이에요. 증감률은 1년 전 같은 기간 보고서와 비교한 값이에요.")
     table = cp.table_rows(ordered, shown)
