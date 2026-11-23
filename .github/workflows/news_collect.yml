@@ -7,6 +7,9 @@ on:
       pages:
         description: "검색어 하나당 몇 쪽(100건씩, 1~10)"
         default: "10"
+      mode:
+        description: "collect = 새로 검색 / reclassify = 검색 없이 모아 둔 기사만 다시 분류"
+        default: "collect"
 permissions:
   contents: read
 concurrency:
@@ -39,7 +42,7 @@ jobs:
         env:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-        run: python tools/news_collect.py --out out/naver_reports.jsonl --summary out/summary.md --pages "${{ inputs.pages }}"
+        run: python tools/news_collect.py --out out/naver_reports.jsonl --summary out/summary.md --pages "${{ inputs.pages }}" ${{ inputs.mode == 'reclassify' && '--reclassify' || '' }}
       - name: paper-private에 올리기
         run: |
           cd out

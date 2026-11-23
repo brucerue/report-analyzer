@@ -39,6 +39,7 @@ class Session:
 def test_classify_and_search():
     k, t, s = nc.classify("가나전자 직원 평균 연봉 1억… 사업보고서에 따르면 자사주 소각")
     check(k == ["사업보고서"] and "직원 급여" in t and "자사주" in t and "VIII. 임원 및 직원" in s, "분류 (종류·주제·보고서 부분)")
+    check("실적(매출·이익)" in nc.classify("분기보고서에 따르면 영업이익 1조 적자 전환")[1], "실적 주제")
     check(nc.press_of("https://www.joongang.co.kr/article/1") == "중앙일보" and nc.press_of("https://biz.chosun.com/x") == "조선비즈", "언론사")
     page1 = [item(i, f"<b>가상</b>회사 {i} 가동률", "분기보고서에 따르면 가동률 &quot;80%&quot;", f"https://www.yna.co.kr/{i}") for i in range(100)]
     page1[5]["description"] = "보고서 낱말 없는 기사"
@@ -75,6 +76,9 @@ def test_main_writes(monkey_dir=None):
         requests.Session = orig
     rows = [json.loads(x) for x in open(out, encoding="utf-8")]
     check(len(rows) == 2 and os.path.exists(summ), "지난 파일에 합쳐 저장 + 집계 파일")
+    sys.argv = ["x", "--out", out, "--summary", summ, "--reclassify"]
+    nc.main()
+    check("치우침 없는 표본" in open(summ, encoding="utf-8").read(), "다시 분류 모드 + 치우침 없는 표본 표")
 
 
 if __name__ == "__main__":

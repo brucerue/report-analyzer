@@ -42,11 +42,12 @@ TOPICS = [
     ("수주|수주잔고", "수주", "II-4. 매출 및 수주"),
     ("소송|제재|과징금|우발|채무보증|분쟁", "소송·제재·우발", "XI. 그 밖에 투자자 보호"),
     ("특수관계|내부거래|일감", "특수관계자 거래", "X. 대주주 등과의 거래"),
+    ("매출액|영업이익|순이익|영업손실|순손실|적자|흑자|실적", "실적(매출·이익)", "III·IV. 재무·경영진단"),
     ("차입|부채|현금|유동성|회사채", "부채·현금", "III·IV. 재무·경영진단"),
     ("재고", "재고", "III. 재무 주석"),
     ("전망|위험 요인|리스크", "전망·위험", "IV. 이사의 경영진단"),
 ]
-TOPIC_WORDS = ["연봉", "직원", "보수", "임원", "지분", "자사주", "배당", "출자", "종속회사", "가동률", "원재료",
+TOPIC_WORDS = ["영업이익", "연봉", "직원", "보수", "임원", "지분", "자사주", "배당", "출자", "종속회사", "가동률", "원재료",
                "시설투자", "연구개발", "매출", "수주", "소송", "특수관계", "부채", "재고", ""]
 PRESS = {  # 기사 원문 주소 -> 언론사 (주요 매체만, 나머지는 도메인)
     "chosun.com": "조선일보", "joongang.co.kr": "중앙일보", "donga.com": "동아일보", "hankyung.com": "한국경제",
@@ -155,9 +156,14 @@ def summary(rows):
         by_kind.update(r.get("kinds") or [])
         by_month[(r.get("date") or "")[:7] or "-"] += 1
         by_press[r.get("press") or "-"] += 1
+    plain = [r for r in rows if any(q in PHRASES for q in r.get("queries") or [])]
+    by_plain = Counter(t for r in plain for t in (r.get("topics") or ["(주제 없음)"]))
     lines = [f"# 정기보고서 기사 집계 (네이버 뉴스 검색)", "",
              f"- 만든 때: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC · 기사 {len(rows):,}건 (제목·요약 2줄 기준 분류, 한 기사가 여러 주제에 걸림)", ""]
-    for title, c, n in (("주제별", by_topic, 30), ("보고서 부분별", by_sec, 30), ("보고서 종류별", by_kind, 5), ("언론사별(상위 20)", by_press, 20)):
+    lines += ["## 주제별 — 치우침 없는 표본 (주제 낱말 없이 문구만으로 검색한 기사)", "",
+              f"주제 낱말을 붙인 검색은 그 주제 기사를 더 많이 모으므로, 순위는 이 표로 본다. 표본 {len(plain):,}건.", "",
+              "| 주제 | 건수 | 비중 |", "|---|---|---|"] + [f"| {k} | {v:,} | {v / max(len(plain), 1) * 100:.1f}% |" for k, v in by_plain.most_common(30)] + [""]
+    for title, c, n in (("주제별 (전체, 검색 방식 영향 있음)", by_topic, 30), ("보고서 부분별", by_sec, 30), ("보고서 종류별", by_kind, 5), ("언론사별(상위 20)", by_press, 20)):
         lines += [f"## {title}", "", "| 항목 | 건수 |", "|---|---|"] + [f"| {k} | {v:,} |" for k, v in c.most_common(n)] + [""]
     lines += ["## 월별", "", "| 월 | 건수 |", "|---|---|"] + [f"| {k} | {v:,} |" for k, v in sorted(by_month.items(), reverse=True)] + [""]
     return "\n".join(lines)
@@ -168,7 +174,20 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--summary", required=True)
     ap.add_argument("--pages", type=int, default=10, help="검색어 하나당 몇 쪽(100건씩, 최대 10)")
+    ap.add_argument("--reclassify", action="store_true", help="검색하지 않고 지난 파일의 기사만 다시 분류 (주제 표를 바꿨을 때)")
     a = ap.parse_args()
+    if a.reclassify:
+        with open(a.out, encoding="utf-8") as f:
+            rows = [json.loads(x) for x in f if x.strip()]
+        for r in rows:
+            r["kinds"], r["topics"], r["sections"] = classify(r.get("title", "") + " " + r.get("desc", ""))
+        with open(a.out, "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        with open(a.summary, "w", encoding="utf-8") as f:
+            f.write(summary(rows))
+        print(f"다시 분류 {len(rows):,}건")
+        return
     cid, secret = os.environ.get("NAVER_CLIENT_ID"), os.environ.get("NAVER_CLIENT_SECRET")
     if not cid or not secret:
         sys.exit("NAVER_CLIENT_ID·NAVER_CLIENT_SECRET이 없어요 (GitHub Secrets).")
