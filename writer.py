@@ -7,6 +7,8 @@
 - 회사 설명을 옮긴 카드(실적 변동 이유): '회사는 "…"라고 설명했다' 인용 한 문장.
 - 표 줄만 보여 주는 카드(투자 계획·원문 줄 가동률·지역): 문장을 만들지 않는다 (단위·기간이 표마다 달라 숫자를 옮기면 틀리기 쉬움).
 """
+import re
+
 import plant
 import points as pt
 
@@ -28,12 +30,24 @@ def _chg(now, prev, unit_word=("증가했다", "감소했다")):
 
 
 def _pp(now, prev):
+    """'0.3%p 상승했다' / '같은 수준이었다'. 원래 값이 소수 둘째 자리면 둘째 자리까지 (0.04% -> 0.05%: '0.01%p 하락')."""
     if now is None or prev is None:
         return None
+    nd = max(len(str(x).split(".")[1]) if "." in str(x) else 0 for x in (now, prev))
+    nd = 2 if nd >= 2 else 1
     d = now - prev
-    if round(d, 1) == 0:
+    if round(d, nd) == 0:
         return "같은 수준이었다"
-    return f"{abs(d):.1f}%p {'상승했다' if d > 0 else '하락했다'}"
+    return f"{abs(d):.{nd}f}%p {'상승했다' if d > 0 else '하락했다'}"
+
+
+def _vs(base_text, now, prev):
+    """'2025년 말(26.6%)보다 0.3%p 상승했다' / '2025년 말(26.6%)과 같은 수준이었다'."""
+    pp = _pp(now, prev)
+    if pp != "같은 수준이었다":
+        return f"{base_text}보다 {pp}"
+    head = re.sub(r"\([^()]*\)$", "", base_text)  # 조사는 괄호 앞 낱말에: '2025년 말(26.6%)과'
+    return f"{base_text}{j(head, '과/와')[len(head):]} 같은 수준이었다"
 
 
 def _profit(now, prev):
@@ -88,14 +102,14 @@ def w_income(d, period, before, annual):
         elif n["op"] < 0 or "전환" in how:
             op = f"{_pl('영업', n['op'])}을 내 {how}"
         else:
-            op = f"영업이익은 {pt.won_text(n['op'])}으로 {how}"
+            op = f"영업이익은 {pt.won_text(n['op'])}으로 {'' if n['rev'] is not None and p['rev'] else before + '보다 '}{how}"
     if rev and op:
         out.append(f"{period} {_and(rev)}, {op}.")
     elif rev or op:
         out.append(f"{period} {rev or op}.")
     if d.get("margin") is not None and d.get("pmargin") is not None and n["op"] is not None and n["op"] > 0:
-        pp = _pp(d["margin"], d["pmargin"])
-        out.append(f"영업이익률은 {d['margin']:.1f}%로 {before}({d['pmargin']:.1f}%)" + ("와 같은 수준이었다." if pp == "같은 수준이었다" else f"보다 {pp}."))
+        pm = d["pmargin"]
+        out.append(f"영업이익률은 {d['margin']:.1f}%로 " + _vs("%s(%.1f%%)" % (before, pm), round(d["margin"], 1), round(pm, 1)) + ".")
     if n["net"] is not None and p["net"] is not None:
         how = _profit(n["net"], p["net"])
         out.append(f"순이익은 {pt.won_text(n['net'])}으로 {how}." if n["net"] >= 0 and "전환" not in how else f"{_pl('순', n['net'])}을 내 {how}.")
@@ -212,11 +226,14 @@ def w_plant(d, period, before, annual):
 
 def w_material(d, period, before, annual):
     m, pm = d["mat"], d.get("prev")
+    if not m["unit"]:
+        return []  # 단위를 모르면 문장을 만들지 않는다
     tot = pt.money_text(m["total"], m["unit"])
-    s = f"{period} 원재료 매입액은 {tot}" + (f"으로 {before}보다 {_chg(m['total'], pm['total'])}." if pm else "이다.")
+    chg = d.get("chg")
+    s = f"{period} 원재료 매입액은 {tot}" + (f"으로 {before}보다 {_chg(*chg)}." if pm and chg else "이다.")
     out = [s.replace(f"{tot}으로", j(tot, "으로/로"))]
     if m["items"]:
-        name, v, sh, _ = m["items"][0]
+        _, v, sh, _, name = m["items"][0]
         out.append(f"가장 많이 사들인 품목은 {name}({pt.money_text(v, m['unit'])}" + (f", 비중 {sh:g}%)다." if sh is not None else ")이다."))
     return out
 
@@ -230,7 +247,8 @@ def w_capex(d, period, before, annual):
 
 def w_debt(d, period, before, annual):
     n, p = d["now"], d["prev"]
-    out = [f"부채비율은 {n['debt_ratio']:.1f}%로 {d.get('prev_end') or '지난해 말'}({p['debt_ratio']:.1f}%)보다 {_pp(n['debt_ratio'], p['debt_ratio'])}."
+    pe = d.get("prev_end") or "지난해 말"
+    out = [f"부채비율은 {n['debt_ratio']:.1f}%로 " + _vs("%s(%.1f%%)" % (pe, p["debt_ratio"]), round(n["debt_ratio"], 1), round(p["debt_ratio"], 1)) + "."
            if p.get("debt_ratio") is not None else f"부채비율은 {n['debt_ratio']:.1f}%다."]
     if n.get("borrow") is not None:
         s = f"차입금(사채 포함)은 {pt.won_text(n['borrow'])}"
@@ -257,7 +275,7 @@ def w_rnd(d, period, before, annual):
     if ratio:
         b = d.get("ratio0")
         if b is not None:
-            out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%로 {before}({b}%)보다 {_pp(ratio[0], b)}.")
+            out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%로 {_vs(f'{before}({b}%)', ratio[0], b)}.")
         else:
             out.append(f"매출 대비 연구개발비 비율은 {ratio[0]}%다.")
     return out

@@ -308,6 +308,36 @@ def test_api_cards():
     check(any(r[0] == "현금배당 총액" and "11조원" in r[1] for r in cards["return"]["rows"]) and cards["return"]["value"] == "소각 50주", "자사주·배당")
 
 
+
+def test_sweep_fixes():
+    """업종별 점검(tools/sweep.py, 2026.11.23)에서 찾은 문제들."""
+    import plant
+    import writer as w
+    check(w._pp(0.04, 0.05) == "0.01%p 하락했다" and w._pp(36.73, 36.72) == "0.01%p 상승했다" and w._pp(31.54, 31.54) == "같은 수준이었다",
+          "작은 변화: 소수 둘째 자리까지 (같은 수준이라고 하지 않음)")
+    check(w._vs("2025년 말(26.6%)", 26.6, 26.6) == "2025년 말(26.6%)과 같은 수준이었다", "'…보다 같은 수준' 대신 '…과 같은 수준'")
+    check(plant.clean_name("EV용 배터리, ESS용 배터리,소형 Application용 배터리 등(국내: 오창 등해외: 중국 남경)") == "EV용 배터리, ESS용 배터리 등",
+          "긴 품목 칸 줄이기 (LG에너지솔루션)")
+    txt = ("II. 사업의 내용\n3. 원재료 및 생산설비\n(단위 : 대)\n"
+           "사업부문 | 품목 | 사업소 | 능력 | 실적 | 가동률 |\n"
+           "컨테이너부문 | 용역 | - | 100 | 80 | 80.0% |\n"
+           "환경 | 경유사용량 | 1,397 | 100 | 200 | -14.6% |\n"
+           "V. 회계감사인의 감사의견 등\nx\n")
+    rows = plant.rate_rows(rp.parse_report(txt))
+    check(len(rows) == 1 and rows[0]["place"] == "", "'-' 소재지는 비우고, 경유사용량·음수 가동률 줄은 뺌 (HMM·CJ제일제당)")
+    mat = ("II. 사업의 내용\n3. 원재료 및 생산설비\n가. 주요 원재료\n"
+           "매입유형 | 품목 | 용도 | 매입액(억원) | 비중 |\n"
+           "원재료 | 편광판 | 패널 | 10,544 | 15.4% |\n"
+           "기 타 | 기 타 | - | 20,000 | 30.0% |\n"
+           "합계 | 68,587 | 100.0% |\n\nV. 회계감사인의 감사의견 등\nx\n")
+    m = pt.material_table(rp.parse_report(mat))
+    check(m["unit"] == "억원" and m["items"][0][4] == "편광판(패널)" and len(m["items"]) == 1, "원재료: '매입액(억원)' 단위, '기 타' 뺌, 기사용 이름 (LG디스플레이)")
+    c = {x["key"]: x for x in pt.build_cards(rp.parse_report(mat.replace("(억원)", "")), None, None)}["material"]
+    check(not c["sentences"] and "단위를 찾지 못해" in c["note"], "단위를 모르면 문장을 만들지 않음 (대한항공)")
+    neg = REPORT.replace("{x}", "").replace("| 2.5% |", "| -0.5% |")
+    r = {x["key"]: x for x in pt.build_cards(rp.parse_report(neg), None, None)}.get("rnd")
+    check(r is None or r["value"] is None, "음수 R&D 비율은 버림 (이마트)")
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

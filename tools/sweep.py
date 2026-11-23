@@ -23,7 +23,7 @@ GROUPS = {
     "1": [("반도체", "SK하이닉스"), ("디스플레이", "LG디스플레이"), ("2차전지", "LG에너지솔루션"), ("화학", "LG화학"), ("정유", "S-Oil")],
     "2": [("철강", "현대제철"), ("조선", "HD현대중공업"), ("건설", "현대건설"), ("자동차부품", "현대모비스"), ("방산", "한화에어로스페이스")],
     "3": [("항공", "대한항공"), ("해운", "HMM"), ("통신", "SK텔레콤"), ("유통", "이마트"), ("식품", "CJ제일제당")],
-    "4": [("바이오", "삼성바이오로직스"), ("제약", "유한양행"), ("게임", "엔씨소프트"), ("인터넷", "NAVER"), ("전력", "한국전력공사")],
+    "4": [("바이오", "삼성바이오로직스"), ("제약", "유한양행"), ("게임", "엔씨"), ("인터넷", "NAVER"), ("전력", "한국전력공사")],
     "5": [("보험", "삼성화재"), ("증권", "미래에셋증권"), ("기계·에너지", "두산에너빌리티"), ("코스닥 장비", "리노공업"), ("코스닥 화장품", "에이피알")],
 }
 
@@ -42,11 +42,11 @@ def checks(cards, is_fin):
     """이상해 보이는 곳 -> [문장]."""
     out = []
     for c in cards:
-        txt = " ".join([str(c.get("title")), str(c.get("value")), str(c.get("prev")), str(c.get("change"))]
+        txt = " ".join([str(c.get(k)) for k in ("title", "value", "prev", "change") if c.get(k) is not None]
                        + [f"{a} {b}" for a, b, _ in c["rows"]] + c.get("sentences", []))
-        if re.search(r"None|nan|\{|\}", txt):
+        if re.search(r"None|\bnan\b|\{|\}| · · |\(-\)", txt):
             out.append(f"[{c['key']}] 'None/nan/괄호' 글자: {txt[:160]}")
-        if c.get("value") and not c.get("sentences") and c["key"] not in ("plan", "consol") and not c.get("empty"):
+        if c.get("value") and not c.get("sentences") and c["key"] not in ("plan", "consol", "material") and not c.get("empty"):
             out.append(f"[{c['key']}] 값은 있는데 기사 문장이 없음")
         d = c.get("data") or {}
         if c["key"] == "debt" and d.get("now", {}).get("debt_ratio") and d["now"]["debt_ratio"] > 800 and not is_fin:
@@ -73,14 +73,15 @@ def checks(cards, is_fin):
 
 
 def one(session, cache, key, corps, sector, name):
-    c = dc.find_corps(corps, name, limit=1)
-    if not c:
-        print(f"\n######## [{sector}] {name}: 회사 못 찾음")
-        return [f"{sector} {name}: 회사 못 찾음"]
-    corp = c[0]
-    rows = dc.latest_versions(dc.periodic_reports(session, cache, key, corp["corp_code"]))
-    if not rows:
-        return [f"{sector} {name}: 보고서 없음"]
+    corp, rows = None, []
+    for cand in dc.find_corps(corps, name, limit=4):  # 같은 이름의 옛 회사(정기보고서 없음)는 건너뜀
+        rows = dc.latest_versions(dc.periodic_reports(session, cache, key, cand["corp_code"]))
+        if rows:
+            corp = cand
+            break
+    if not corp:
+        print(f"\n######## [{sector}] {name}: 회사·보고서 못 찾음")
+        return [f"{sector} {name}: 회사·보고서 못 찾음 (후보 {[c['corp_name'] + '/' + (c['stock_code'] or '-') for c in dc.find_corps(corps, name, limit=4)]})"]
     row = rows[0]  # 가장 최근 정기보고서 (앱 기본값과 같음)
     year, reprt = pt.reprt_of(row)
     period = period_phrase(row)

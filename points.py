@@ -174,7 +174,7 @@ def consol_list(parsed):
         if names and "|" not in t:
             break  # 첫 표가 끝남 (뒤의 변동 내역 표 등은 세지 않는다)
         if len(c) == ncol and re.search(r"\d", " ".join(c[1:])):
-            names.append((no, c[0]))
+            names.append((no, re.sub(r"\s*\(주\s*\d+(?:,\s*\d+)*\)\s*$", "", c[0]).strip()))  # 끝의 각주 표시 '(주2)'
     return names, summary
 
 
@@ -273,6 +273,8 @@ def region_sales(parsed):
                         names = leaf + ["합계"]
                     elif len(vals) == len(leaf):
                         names = leaf
+                    if names and any(re.sub(r"\s+", "", n) in ("3개월", "누적", "당분기", "전분기") for n in names):
+                        names = None  # 분기 표의 '3개월 | 누적' 머리글 (지역 이름이 아님)
                     if names and period not in out:
                         names = ["국내" if re.search(r"본사|국내", n) else n for n in names]
                         out[period] = list(zip(names, vals))
@@ -606,6 +608,8 @@ def material_table(parsed):
             unit = unit_of(t)[0] or unit or (re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t) or [None, None])[1]
         if "|" in t and "매입액" in t and start is None:
             start = i
+            m = re.search(r"매입(?:액|금액)\s*\(\s*(?:단위\s*[:：]?\s*)?(억원|백만원|천원|원)", t)
+            unit = m.group(1) if m else unit
             break
     if start is None:
         return None
@@ -628,24 +632,42 @@ def material_table(parsed):
             subtotal.append(amount)
         elif first == "계":
             continue  # 현대차 '계 | 부품 | …' 같은 중간 합계 줄
-        elif texts and not re.fullmatch(r"기타", texts[-1]):
-            items.append((" · ".join(texts[-3:]), amount, share, no))  # 공장·유형·품목 (현대차) / 부문·품목·용도 (삼성전자)
+        elif texts and not re.fullmatch(r"기\s*타(\s*등)?", texts[-1].strip()):
+            items.append((" · ".join(texts[-3:]), amount, share, no, item_name(texts[-3:])))  # 공장·유형·품목 (현대차) / 부문·품목·용도 (삼성전자)
     if total is None and subtotal:
         total = sum(subtotal)
     if total is None and not items:
         return None
     items.sort(key=lambda x: -(x[1] or 0))
+    if not unit:  # 표 뒤 주석 줄 '(단위 : 백만원)' 등
+        for no, t in lines[start:start + 60]:
+            m = re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t)
+            if m:
+                unit = m.group(1)
+                break
     return dict(total=total, unit=unit or "", items=items, line_total=line_total)
+
+
+def item_name(texts):
+    """원재료 표 이름 칸 -> 기사용 이름: ['원재료', '양극재, 음극재,분리막 등', '전지 원재료'] -> '양극재, 음극재,분리막 등(전지 원재료)'."""
+    xs = [x for x in texts if not re.fullmatch(r"(원재료|원자재|상품|부재료|자재)(\s*등)?|기\s*타", re.sub(r"\s+", " ", x).strip())]
+    xs = xs or texts
+    return xs[0] if len(xs) == 1 else f"{xs[-2]}({xs[-1]})" if len(xs) >= 2 else ""
+
+
+def to_won(v, unit):
+    return v * UNIT_MULT[unit] if v is not None and unit in UNIT_MULT else None
 
 
 def invest_plan_lines(parsed, limit=6):
     """II-3 안의 투자 계획·실적 줄 (계산하지 않고 원문 줄만): '투자' 글이 있고 숫자가 든 표 줄과 그 바로 앞 표 머리."""
-    out = []
+    out, seen = [], set()
     lines = block_lines(parsed, "biz_plant")
     for i, (no, t) in enumerate(lines):
         if "투자" in t and ("계획" in t or "실적" in t or "현황" in t) and re.search(r"\d", t):
             for no2, t2 in lines[i:i + 8]:
-                if "|" in t2 and re.search(r"\d", t2):
+                if "|" in t2 and re.search(r"\d", t2) and no2 not in seen:
+                    seen.add(no2)
                     out.append((no2, t2[:200]))
                 if len(out) >= limit:
                     return out
@@ -867,7 +889,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                             data=dict(top=top[:3])))
         # 5) 최대주주·소액주주
         h1, h0 = holder_stats(api("hyslrSttus")[0]), holder_stats(api("hyslrSttus")[1])
-        if h1:
+        if h1 and (h1["total"] is not None or h1["rate"] is not None):
             rows5 = []
             if h1["rate"] is not None:
                 rows5.append((f"최대주주 {h1['name']}", f"{h1['rate']}%", None))
@@ -875,7 +897,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
             if m1 and m1["count"]:
                 rows5.append(("소액주주", f"{m1['count']:,}명" + (f" ({L['same_point']} {m0['count']:,}명, {change_text(m1['count'], m0['count'])})" if m0 and m0["count"] else ""), None))
             base = h1["total0"] if h1["total0"] is not None else (h0["total"] if h0 else None)
-            out.append(card("holder", "최대주주·특수관계인 지분 (보통주)", value=f"{h1['total']}%" if h1["total"] is not None else "-",
+            out.append(card("holder", "최대주주·특수관계인 지분 (보통주)", value=f"{h1['total']}%" if h1["total"] is not None else None,
                             prev=(f"{L['prev_end']} {base}%" if h1["total0"] is not None else f"{L['same_point']} {base}%") if base is not None else None,
                             change=change_text(h1["total"], base, pct=False) if h1["total"] is not None and base is not None else None,
                             rows=rows5,
@@ -912,7 +934,7 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
         for r in ranked[:6]:
             before = f"{r['prev_rate']:.1f}% → " if r["prev_rate"] is not None else ""
             rows7.append((plant.label(r), f"{before}{r['rate']:.1f}%" + (f" ({plant.pp(r['diff'])})" if r["diff"] is not None else ""), r["line"]))
-        out.append(card("plant", f"가동률 · {main['label']}" + (f" · {L['title']}" if L["title"] else ""), value=f"{now['rate']:.1f}%",
+        out.append(card("plant", "가동률" + (f" · {main['label']}" if main["label"] else "") + (f" · {L['title']}" if L["title"] else ""), value=f"{now['rate']:.1f}%",
                         prev=f"{L['prev']} {main['prev']['rate']:.1f}%" if main["prev"] else None,
                         change=plant.pp(now["rate"] - main["prev"]["rate"]) if main["prev"] else None, rows=rows7,
                         note=f"{now['n']}곳 합산 = 생산실적 합 ÷ 생산능력 합 (단위 {main['unit']}). 공장별은 보고서에 적힌 가동률. 하락 폭 큰 순.",
@@ -924,13 +946,17 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
     mat = material_table(parsed)
     if mat and mat["total"]:
         pm = material_table(prev_parsed) if prev_parsed else None
-        rows_m = [(name, money_text(v, mat["unit"]) + (f" · 비중 {sh:g}%" if sh is not None else ""), no) for name, v, sh, no in mat["items"][:5]]
+        nw, pw = to_won(mat["total"], mat["unit"]), to_won(pm["total"], pm["unit"]) if pm else None
+        same_unit = bool(pm and pm["total"] and ((nw and pw) or pm["unit"] == mat["unit"]))
+        cmp_now, cmp_prev = (nw, pw) if nw and pw else ((mat["total"], pm["total"]) if same_unit else (None, None))
+        rows_m = [(name, money_text(v, mat["unit"]) + (f" · 비중 {sh:g}%" if sh is not None else ""), no) for name, v, sh, no, _ in mat["items"][:5]]
         out.append(card("material", "원재료 매입액" + (f" · {L['title']}" if L["title"] else ""), value=money_text(mat["total"], mat["unit"]),
                         prev=f"{L['prev']} {money_text(pm['total'], pm['unit'])}" if pm and pm["total"] else None,
-                        change=change_text(mat["total"], pm["total"]) if pm and pm["total"] and pm["unit"] == mat["unit"] else None,
+                        change=change_text(cmp_now, cmp_prev) if same_unit else None,
                         rows=rows_m, lines=[mat["line_total"]] if mat["line_total"] else [],
-                        note=("합계 줄이 없어 부문 소계를 더했어요. " if not mat["line_total"] else "") + "비중은 표에 적힌 값이에요(부문 안 비중일 수 있어요).", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표",
-                        data=dict(mat=mat, prev=pm if pm and pm["total"] and pm["unit"] == mat["unit"] else None)))
+                        note=("합계 줄이 없어 부문 소계를 더했어요. " if not mat["line_total"] else "")
+                        + ("표 단위를 찾지 못해 숫자만 보여 줘요(기사 문장은 만들지 않아요). " if not mat["unit"] else "") + "비중은 표에 적힌 값이에요(부문 안 비중일 수 있어요).", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표",
+                        data=dict(mat=mat, prev=pm if same_unit else None, chg=(cmp_now, cmp_prev) if same_unit else None)))
 
     # 7-3) 시설투자: 현금흐름표 '유형자산의 취득'(DART 재무제표) — 원문 투자 계획 줄은 따로 'plan' 카드(원문 카드)
     plan = invest_plan_lines(parsed)
@@ -966,11 +992,20 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
 
     # 8) R&D — 전년 동기 대비: 사업보고서는 표의 전기 칸, 분기·반기는 1년 전 같은 기간 보고서의 당기 칸
     r = rnd_ratio(parsed)
+    if r and r.get("ratio") and not (0 <= r["ratio"][0] <= 100):
+        r.pop("ratio")  # 음수·100% 넘는 비율은 다른 줄을 잘못 읽은 것 (이마트 -0.5%)
+    if r and not r.get("ratio") and "cost" in r and r["cost"][0] is not None and r["cost"][0] < 0:
+        r = None
     if r:
         r0 = rnd_ratio(prev_parsed) if prev_parsed else None
         def base_of(k):
             if r0 and r0.get(k):
-                return r0[k][0]
+                b = r0[k][0]
+                if k == "cost" and b and r.get(k) and not (0.2 <= r[k][0] / b <= 5):
+                    return None  # 1년 사이 5배 넘게 달라지면 표가 다르게 읽힌 것 (확인 필요)
+                if k == "ratio" and (b is None or not 0 <= b <= 100):
+                    return None
+                return b
             return r[k][1] if reprt == "11011" and r.get(k) else None
         rows8 = []
         if "cost" in r:

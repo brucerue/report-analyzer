@@ -48,8 +48,10 @@ def rate_rows(parsed):
         cap, prod, rep = to_num(c[-3]), to_num(c[-2]), to_num(c[-1])
         if cap is None or prod is None or rep is None:
             continue
-        texts = [x for x in c[:-3] if x]
-        if not texts:
+        texts = [x for x in c[:-3] if x and x.strip() not in ("-", "–") and to_num(x) is None]  # 숫자 칸(설비 용량 등)은 이름이 아님
+        if not texts or not (0 <= rep <= 200):
+            continue
+        if any(NOT_PLANT.search(x) for x in texts + [group]):  # 경유사용량·배출량 같은 다른 표
             continue
         if full is None:
             full = len(texts)
@@ -57,8 +59,10 @@ def rate_rows(parsed):
             group, texts = texts[0], texts[1:]
         if any(re.sub(r"\s+", "", x) in TOTAL_WORDS for x in texts):
             continue
-        name = texts[0]
-        place = texts[1] if len(texts) > 1 else ""
+        name = clean_name(texts[0])
+        place = clean_name(texts[1]) if len(texts) > 1 else ""
+        if re.fullmatch(r"(평균)?가동률(\(%\))?", re.sub(r"\s+", "", name)):
+            name = group or "전체"
         key = (re.sub(r"\s+", "", group), re.sub(r"\s+", "", name), re.sub(r"\s+", "", place))
         out.append(dict(key=key, group=group, name=name, place=place, cap=cap, prod=prod,
                         rate=rep, calc=prod / cap * 100 if cap else None, reported=rep, unit=unit_for(group, unit), line=no))
@@ -71,6 +75,19 @@ def total(rows, prev=False):
     cap, prod = sum(r[k + "cap"] for r in rows), sum(r[k + "prod"] for r in rows)
     rate = rows[0][k + "rate"] if len(rows) == 1 else (prod / cap * 100 if cap else None)
     return dict(cap=cap, prod=prod, rate=rate, n=len(rows))
+
+
+NOT_PLANT = re.compile(r"사용량|배출|온실가스|에너지|용수|폐기물")
+
+
+def clean_name(x):
+    """긴 품목 칸 줄이기: 'EV용 배터리, ESS용 배터리,소형 … 등(국내: 오창 등해외: …)' -> 'EV용 배터리, ESS용 배터리 등'."""
+    x = re.sub(r"\s+", " ", str(x)).strip()
+    x = re.sub(r"\([^)]*[:：][^)]*\)", "", x).strip()  # '(국내: …)' 같은 소재지 설명
+    if len(x) > 24 and "," in x:
+        parts = [t.strip() for t in x.split(",") if t.strip()]
+        x = ", ".join(parts[:2]).rstrip(" 등") + " 등"
+    return x
 
 
 def compare(parsed, prev_parsed):
@@ -199,7 +216,6 @@ def sentences(st, period_text="이번 기간", annual=False):
             out.append(f"{period_text} {st['now']['n']}개 {noun}의 전체 가동률은 {st['now']['rate']:.1f}%다.")
         elif rows:
             out.append(f"{period_text} {label(rows[0])} 가동률은 {rows[0]['rate']:.1f}%다.")
-        out.append("(1년 전 같은 기간 보고서가 없거나 같은 이름의 거점이 없어 비교하지 못했어요.)")
     ranked = [r for r in rows if r.get("diff") is not None]
     if len(ranked) > 1:
         worst, best = min(ranked, key=lambda r: r["diff"]), max(ranked, key=lambda r: r["diff"])
