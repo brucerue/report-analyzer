@@ -18,4 +18,5 @@ jobs:
       - run: python tests/test_compare.py
       - run: python tests/test_news.py
       - run: python tests/test_article.py
+      - run: python tests/test_claude.py
       - run: python tests/test_app.py

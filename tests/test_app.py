@@ -154,3 +154,19 @@ assert not at.exception, at.exception
 assert any("규칙 점검은 못 했어요" in w.value for w in at.warning) and "첫 초안 본문" in " ".join(c.value for c in at.code), "점검 실패해도 첫 초안"
 print("ok - 점검에서 한도에 걸려도 첫 초안은 보임")
 
+
+
+# ---- Claude 키가 있으면 '쓰는 AI' 고르기 ----
+os.environ["ANTHROPIC_API_KEY"] = "TEST"
+import claude_ai
+used = []
+claude_ai.call_claude = lambda key, prompt, system, model=None: (used.append(1) or
+                                                                 ("제목: 가나전지 실적\n\nClaude 초안 9조원." if len(used) == 1 else "제목: 가나전지 실적\n\nClaude 점검본 9조원.\n\n[고친 곳]\n- 없음"))
+at.run()
+eng = at.radio(key="f_engine")
+assert any(o.startswith("Claude") for o in eng.options), eng.options
+eng.set_value(next(o for o in eng.options if o.startswith("Claude"))).run()
+at.button(key="f_go").click().run()
+assert not at.exception, at.exception
+assert len(used) == 2 and "Claude 점검본" in " ".join(c.value for c in at.code), "Claude로 작성·점검"
+print("ok - Claude 키가 있으면 골라서 쓰기")

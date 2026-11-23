@@ -4,9 +4,9 @@
 산업 취재 도우미(공개 저장소 `brucerue/DART-Joongang`)에서 갈라져 나왔다. 사용자는 한국어, 짧고 친절한 설명과 단계별 안내를 좋아함.
 
 ## 반드시 지킬 것
-- 이 저장소는 **공개**. API 키·토큰을 파일에 쓰지 않는다. 비밀값은 Streamlit Secrets(`DART_API_KEY`, `GEMINI_API_KEY`)에만. 채팅에 붙여 넣으라고 하지 않는다.
+- 이 저장소는 **공개**. API 키·토큰을 파일에 쓰지 않는다. 비밀값은 Streamlit Secrets(`DART_API_KEY`, `GEMINI_API_KEY`, `PAPER_PRIVATE_READ_TOKEN`, 선택 `ANTHROPIC_API_KEY`)에만. 채팅에 붙여 넣으라고 하지 않는다.
 - **기사 원문(제목·리드·링크)과 특정 회사 분석 결과·보관함은 이 저장소에 넣지 않는다.** 비공개 저장소 `brucerue/paper-private`(`report-analyzer-handoff/`)에 둔다. 여기엔 낱말·건수로 된 우선순위 표만.
-- 추가 비용이 드는 서비스는 쓰지 않는다. AI는 Gemini 무료 등급만(유료 Claude 대체 없음).
+- 추가 비용이 드는 서비스는 쓰지 않는다. AI는 Gemini 무료 등급이 기본. 예외: '기사 쓰기 > 문체 틀'만 Claude API(유료)를 고를 수 있다(2026.11.24 사용자 요청, Secrets `ANTHROPIC_API_KEY`가 있을 때만 선택지가 보임, `claude_ai.py`). 다른 곳에 Claude를 넓히지 않는다.
 - 요청하지 않은 변경은 하지 않는다.
 - 기능을 바꾸면 `app.py`의 `LAST_UPDATED`(한국시간)를 올리고, 같은 커밋에서 `업데이트_기록.md` 맨 위에 `시각 [추가/수정/삭제] 내용 · 바뀐 파일 · ▶할 일`을 적는다.
 - 바꾼 뒤엔 `python tests/test_core.py`, `python tests/test_app.py`(가짜 DART 응답). 화면을 바꿨으면 `tests/fake_app.py`를 띄워 캡처로 확인. 실서버 접속이 안 되는 환경이면 솔직히 말한다.

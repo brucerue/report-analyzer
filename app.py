@@ -1,6 +1,6 @@
 """사업보고서 분석기 — 사업·반기·분기보고서를 목차 부분별로 깊게 읽는 Streamlit 앱.
 
-비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL, PAPER_PRIVATE_READ_TOKEN — 문체 파일 읽기 전용).
+비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL, PAPER_PRIVATE_READ_TOKEN — 문체 파일 읽기 전용, ANTHROPIC_API_KEY·CLAUDE_MODEL — 문체 틀 유료 선택).
 """
 import json
 import os
@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 01:10"
+LAST_UPDATED = "2026.11.24 01:40"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -37,7 +37,9 @@ DART_KEY = load_secret("DART_API_KEY")
 GEMINI_KEY = load_secret("GEMINI_API_KEY")
 GEMINI_MODEL = load_secret("GEMINI_MODEL") or "gemini-3.6-flash"
 GEMINI_FALLBACK = load_secret("GEMINI_FALLBACK_MODEL") or "gemini-3.5-flash-lite"
-STYLE_TOKEN = load_secret("PAPER_PRIVATE_READ_TOKEN")  # 문체 파일(paper-private) 읽기 전용
+STYLE_TOKEN = load_secret("PAPER_PRIVATE_READ_TOKEN")
+CLAUDE_KEY = load_secret("ANTHROPIC_API_KEY")  # 선택(유료): 문체 틀에서만
+CLAUDE_MODEL = load_secret("CLAUDE_MODEL")  # 문체 파일(paper-private) 읽기 전용
 
 
 @st.cache_resource
@@ -460,12 +462,20 @@ def marked(text):
 def render_frame(all_cards, picked, lead, rno):
     """문체 틀: 문체 규칙(paper-private) + 예문 + 고른 요소의 숫자 -> Gemini 작성 -> 규칙 점검."""
     import style as sty
-    st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체 · Gemini 무료)")
+    st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체)")
     ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요. "
             "작성 → 규칙 점검 두 번 AI를 부르고, 숫자는 고른 요소의 값과 대조해요.")
-    if not GEMINI_KEY:
-        ui.note("Streamlit Secrets에 GEMINI_API_KEY를 넣으면 쓸 수 있어요.")
+    engines = (["Gemini (무료)"] if GEMINI_KEY else []) + (["Claude (유료 · 한 번에 수십 원)"] if CLAUDE_KEY else [])
+    if not engines:
+        ui.note("Streamlit Secrets에 GEMINI_API_KEY(무료) 또는 ANTHROPIC_API_KEY(유료)를 넣으면 쓸 수 있어요.")
         return
+    engine = st.radio("쓰는 AI", engines, horizontal=True, key="f_engine") if len(engines) > 1 else engines[0]
+
+    def ask(prompt, system):
+        if engine.startswith("Claude"):
+            import claude_ai
+            return claude_ai.call_claude(CLAUDE_KEY, prompt, system, model=CLAUDE_MODEL)
+        return an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
     try:
         style = sty.load(get_session(), STYLE_TOKEN)
     except sty.StyleError as e:
@@ -481,22 +491,22 @@ def render_frame(all_cards, picked, lead, rno):
             src = art.pct0(json.dumps(data, ensure_ascii=False)) + "\n" + json.dumps(data, ensure_ascii=False)
             try:
                 system, prompt = art.write_prompt(style["rules"], sty.examples_for(style, kind), kind, data)
-                first = an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
+                first = ask(prompt, system)
             except an.AiError as e:
                 first = None
                 st.error(str(e))
             if first:
                 try:
                     system2, prompt2 = art.check_prompt(style["rules"], first)
-                    body, fixes = art.split_check(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt2, system2, GEMINI_FALLBACK))
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src)
+                    body, fixes = art.split_check(ask(prompt2, system2))
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src, engine=engine)
                 except an.AiError as e:  # 점검에서 한도에 걸려도 첫 초안은 살린다
                     st.warning(f"규칙 점검은 못 했어요 — {e} 아래는 점검 전 첫 초안이에요.")
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True)
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True, engine=engine)
     out = st.session_state.get("f_out")
     if out and out["rno"] == rno:
         n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
-        ui.note(f"본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
+        ui.note(f"{out.get('engine', '')} · 본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
         bad = an.unverified_numbers(out["body"], out["src"])
         if bad:
             st.warning("숫자 자료에 없는 숫자가 있어요: " + ", ".join(bad) + ". 고치거나 빼 주세요.")
