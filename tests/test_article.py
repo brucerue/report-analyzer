@@ -62,6 +62,11 @@ def test_frame():
     names = [x["항목"] for x in d2["항목"]]
     assert names == ["이번 분기 실적 · 2026년 3분기(7∼9월)", "실적 · 2026년 1∼9월 누적"] and d2["항목"][0]["리드"] and not d2["항목"][1]["리드"], names
     assert "무형자산" not in str(d2) and str(d2).count("46조원") == 1, "분기 줄은 따로 한 번, 보조 줄은 뺌"
+    cards.append(dict(key="income_q", title="실적 · 2026년 3분기(7∼9월)", value="영업이익 2조원", prev=None, change="흑자 전환",
+                      rows=[("2026년 3분기(7∼9월) 매출", "46조원 (2025년 3분기 대비 3.4% 감소)", None)], source="DART", note=None))
+    d3 = art.facts(cards, ["income_q", "income"], "income_q", "현대자동차", "분기보고서 (2026.09)", "20261116")
+    assert [x["항목"] for x in d3["항목"]] == ["이번 분기 실적 · 2026년 3분기(7∼9월)", "실적 · 2026년 1∼9월 누적"] and d3["항목"][0]["리드"], d3
+    assert str(d3).count("46조원") == 1, "분기 실적을 따로 고르면 누적 카드의 분기 줄은 빠짐"
     system, prompt = art.write_prompt("규칙 전문", ["예문1"], "B", d)
     assert system == "규칙 전문" and "OO일" in prompt and "멘트" in prompt and "약 1200자" in prompt and "내용(회사·숫자·사실)은 쓰지 마라" in prompt and "8조428억원" in prompt
     body, fixes = art.split_check("제목: 가\n\n본문 1\n\n[고친 곳]\n- 전 → 후\n- 없음")

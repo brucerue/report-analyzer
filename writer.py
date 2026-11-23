@@ -131,6 +131,27 @@ def w_income(d, period, before, annual):
     return out
 
 
+def w_income_q(d, period, before, annual):
+    """이번 분기(3개월)만: '3분기(7∼9월) 매출은 …으로 지난해 같은 분기보다 …, 영업이익은 ….'"""
+    q, qp, pq, ql = d["q"], d["qp"], d.get("pq"), d["label"]
+    out = []
+    rev = (f"매출은 {pt.won_text(q['rev'])}으로 지난해 같은 분기보다 {_chg(q['rev'], qp['rev'])}" if q.get("rev") is not None and qp.get("rev")
+           else (f"매출은 {pt.won_text(q['rev'])}이었다" if q.get("rev") is not None else None))
+    how = _profit(q["op"], qp["op"]) if qp.get("op") is not None else None
+    if how is None:
+        op = f"{_pl('영업', q['op'])}을 냈다"
+    elif q["op"] < 0 or "전환" in how:
+        op = f"{_pl('영업', q['op'])}을 내 {how}"
+    else:
+        op = f"영업이익은 {pt.won_text(q['op'])}으로 {how}"
+    out.append(f"{ql} {_and(rev)}, {op}." if rev else f"{ql} {op}.")
+    if pq and pq.get("op") is not None:
+        h2 = _profit(q["op"], pq["op"])
+        base = f"직전 분기인 {d.get('prevq_label') or '지난 분기'}"
+        out.append(f"{base}와 비교하면 영업이익이 {h2}." if q["op"] >= 0 and "전환" not in h2 else f"{base}와 비교하면 {h2}.")
+    return out
+
+
 def w_reason(d, period, before, annual):
     q = d["quotes"][0]
     q = q if len(q) <= 120 else q[:118].rsplit(" ", 1)[0] + "…"
@@ -294,7 +315,7 @@ def w_region(d, period, before, annual):
     return out
 
 
-WRITERS = {"income": w_income, "reason": w_reason, "invest": w_invest, "consol": w_consol, "staff": w_staff, "pay": w_pay,
+WRITERS = {"income": w_income, "income_q": w_income_q, "reason": w_reason, "invest": w_invest, "consol": w_consol, "staff": w_staff, "pay": w_pay,
            "holder": w_holder, "return": w_return, "plant": w_plant, "material": w_material, "capex": w_capex,
            "debt": w_debt, "rnd": w_rnd, "region": w_region}
 

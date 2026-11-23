@@ -747,7 +747,7 @@ def prev_quarter(fetch_rows, year, reprt):
 
 
 EMPTY = {"lines": [], "mains": {}, "blocks": {}}
-FAST_KEYS = {"income", "staff", "pay", "holder", "return", "capex", "debt"}  # 원문 없이 DART 자료만으로 나오는 카드
+FAST_KEYS = {"income", "income_q", "staff", "pay", "holder", "return", "capex", "debt"}  # 원문 없이 DART 자료만으로 나오는 카드
 
 
 def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None, part="all", period=None):
@@ -810,6 +810,16 @@ def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None, period=None):
                             data=dict(now=n, prev=p, qtr=qtr if reprt in ("11012", "11014") else None, margin=margin, pmargin=pmargin, fs=fin.get("fs", ""),
                                       q_label=L["q_now"].split(" ", 1)[1] if L["q_now"] else "분기(3개월)", prevq=fin.get("prevq"), prevq_label=L["prevq"],
                                       q_now=q)))
+            if q and reprt in ("11012", "11014") and q["op"] is not None and qp:  # 이번 분기(3개월)만 따로 고를 수 있게
+                rq = [(f"{ql} 매출", won_text(q["rev"]) + cmp("rev", change_text), None)] if q["rev"] is not None else []
+                rq.append((f"{ql} 영업이익", signed(q["op"], "영업손실") + cmp("op", profit_change), None))
+                out.append(card("income_q", f"실적 · {ql}", value=pl_text("영업", q["op"]),
+                                prev=f"{L['q_prev']} {pl_text('영업', qp['op'])}" if qp["op"] is not None else None,
+                                change=profit_change(q["op"], qp["op"]) if qp["op"] is not None else None, rows=rq,
+                                note="이번 분기 3개월만 (누적에서 앞 분기를 뺀 값). 누적은 위 '실적' 카드.",
+                                source=f"DART 재무제표({fin.get('fs', '')}) · 손익계산서",
+                                data=dict(q=q, qp=qp, pq=fin.get("prevq"), label=L["q_now"].split(" ", 1)[1] if L["q_now"] else "이번 분기",
+                                          prevq_label=L["prevq"])))
     reasons = mdna_reason_lines(parsed)
     if reasons:
         out.append(card("reason", "실적 변동 이유 (회사 설명, 원문 줄)", rows=[("", t, no) for no, t in reasons],

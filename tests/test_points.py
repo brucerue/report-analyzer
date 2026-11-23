@@ -269,6 +269,10 @@ def test_income():
     c2 = {x["key"]: x for x in pt.build_cards(None, None, None, reprt="11014", fin_api=lambda: fin2, part="fast", period="2026년 1∼9월")}["income"]
     check(any(r[0] == "2026년 3분기(7∼9월) 영업이익" and "직전 분기(2026년 2분기) 대비 100.0% 증가" in r[1] for r in c2["rows"]), "분기 줄에 직전 분기 대비")
     check(any(x.startswith("직전 분기인 2026년 2분기와 비교하면 영업이익이 100% 증가했다") for x in c2["sentences"]), "QoQ 기사 문장")
+    cq = {x["key"]: x for x in pt.build_cards(None, None, None, reprt="11014", fin_api=lambda: fin2, part="fast", period="2026년 1∼9월")}.get("income_q")
+    check(cq is not None and cq["title"] == "실적 · 2026년 3분기(7∼9월)", "분기(3개월) 실적 카드 따로")
+    check(cq["change"] == "흑자 전환" and cq["sentences"][0].startswith("3분기(7∼9월) 매출은") and "지난해 같은 분기보다" in cq["sentences"][0]
+          and any(x.startswith("직전 분기인 2026년 2분기와 비교하면") for x in cq["sentences"]), "분기 실적 문장: 전년 같은 분기 + 직전 분기")
     loss = dict(pt.fin_stats([dict(r, thstrm_add_amount="", frmtrm_add_amount="", thstrm_amount=r["thstrm_amount"].replace("2,000", "-34,000000000").replace("46,000", "2531000000000").replace("500", "-81000000000"),
                                    frmtrm_amount=r["frmtrm_amount"].replace("-1,000", "112000000000").replace("43,000", "2774000000000").replace("-300", "54000000000")) for r in q3]), fs="연결")
     lc = {x["key"]: x for x in pt.build_cards(None, None, None, fin_api=lambda: loss, part="fast")}["income"]

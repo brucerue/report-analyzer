@@ -10,7 +10,7 @@ import re
 import plant
 
 TITLE_WORDS = {  # 제목 후보에 쓰는 짧은 이름
-    "income": "실적", "staff": "직원", "pay": "보수", "holder": "지분", "return": "주주환원", "capex": "시설투자",
+    "income": "실적", "income_q": "분기 실적", "staff": "직원", "pay": "보수", "holder": "지분", "return": "주주환원", "capex": "시설투자",
     "debt": "부채비율", "invest": "출자", "consol": "종속회사", "plant": "가동률", "material": "원재료",
     "rnd": "R&D", "region": "지역별 매출", "reason": "실적 배경",
 }
@@ -119,10 +119,14 @@ def facts(cards, picked, lead, corp, report_name, filed):
     for k in order:
         c = by[k]
         q_rows = [r for r in c["rows"] if k == "income" and QTR_ROW.search(r[0])]
-        if q_rows:  # 분기·반기 보고서: 이번 분기(3개월) 실적을 따로 앞세움
+        if q_rows and "income_q" in order:  # '분기 실적'을 따로 골랐으면 누적 카드에선 분기 줄만 뺀다
+            pass
+        elif q_rows:  # 분기·반기 보고서: 이번 분기(3개월) 실적을 따로 앞세움
             items.append({"항목": "이번 분기 실적 · " + q_rows[0][0][:QTR_ROW.search(q_rows[0][0]).end()],
                           "리드": k == lead, "세부": [{"이름": a, "값": b} for a, b, _ in q_rows], "출처": c.get("source") or ""})
-        one = {"항목": c["title"] + (" (누적)" if q_rows and "누적" not in c["title"] else ""), "리드": False if q_rows else k == lead}
+        split = q_rows and "income_q" not in order
+        title = ("이번 분기 실적 · " + c["title"].split("· ", 1)[-1]) if k == "income_q" else c["title"] + (" (누적)" if q_rows and "누적" not in c["title"] else "")
+        one = {"항목": title, "리드": False if split else k == lead}
         if c.get("value"):
             one["값"] = c["value"]
         if c.get("prev"):
