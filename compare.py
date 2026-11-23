@@ -49,6 +49,11 @@ METRICS = [
     ("div", "현금배당 총액", "원", "많", False),
     ("dps", "주당 배당금(보통주)", "원", "많", False),
     ("burn", "자사주 소각", "주", "많", False),
+    ("debt_ratio", "부채비율", "%", "높", False),
+    ("borrow", "차입금", "원", "많", False),
+    ("cash", "현금및현금성자산", "원", "많", False),
+    ("capex", "시설투자(유형자산 취득)", "원", "많", False),
+    ("capex_chg", "시설투자 증감률", "%", "높", False),
     ("rnd", "연구개발비/매출액", "%", "높", True),
     ("util", "가동률(주력 부문 합산)", "%", "높", True),
     ("abroad", "해외 매출 비중", "%", "높", True),
@@ -121,13 +126,28 @@ def doc_metrics(parsed):
     return out
 
 
-def collect(fetch, corps, year, reprt, workers=6):
+def fin_metrics(fin_fetch, corp_code, year, reprt):
+    rows, fs = fin_fetch(corp_code, year, reprt)
+    if not rows:
+        return {}
+    f = pt.fin_stats(rows)
+    n, p = f["now"], f["prev"]
+    return {"debt_ratio": n["debt_ratio"], "borrow": n["borrow"], "cash": n["cash"], "capex": n["capex"],
+            "capex_chg": pct_change(n["capex"], p["capex"]), "fs": "연결" if fs == "CFS" else "별도"}
+
+
+def collect(fetch, corps, year, reprt, workers=6, fin_fetch=None):
     """여러 회사의 기본 지표를 동시에. corps = [(입력, 기업 dict)] -> [dict(name, corp_code, stock_code, ...지표)]."""
     def one(item):
         _, c = item
         try:
             m = api_metrics(fetch, c["corp_code"], year, reprt)
             err = None
+            if fin_fetch:
+                try:  # 재무제표가 안 와도 기본 지표는 남긴다
+                    m.update(fin_metrics(fin_fetch, c["corp_code"], year, reprt))
+                except Exception as e:
+                    err = f"재무제표: {e}"
         except Exception as e:  # DART 오류 한 회사 때문에 전체가 멈추지 않게
             m, err = {}, str(e)
         return dict(name=c["corp_name"], corp_code=c["corp_code"], stock_code=c.get("stock_code", ""), error=err, **m)
@@ -180,7 +200,8 @@ def rank_sentence(rows, key, top_n=3, label=None):
     return s
 
 
-SCALE = {"pay": (1e4, " (만원)"), "top_pay": (1e4, " (만원)"), "div": (1e8, " (억원)"), "dps": (1, " (원)")}
+SCALE = {"pay": (1e4, " (만원)"), "top_pay": (1e4, " (만원)"), "div": (1e8, " (억원)"), "dps": (1, " (원)"),
+         "borrow": (1e8, " (억원)"), "cash": (1e8, " (억원)"), "capex": (1e8, " (억원)")}
 
 
 def table_rows(rows, keys):

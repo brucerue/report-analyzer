@@ -156,6 +156,62 @@ def test_employee_real_shapes():
     check(h["count"] == 34549 and pt.won_text(h["avg"], man=True) == "1억8500만원", "SK하이닉스: 1억8500만원 (기사와 같음)")
 
 
+MAT = """II. 사업의 내용
+3. 원재료 및 생산설비
+가. 주요 원재료 현황
+(단위 : 억원, %) |
+부 문 | 품 목 | 구체적 용도 | 매입액 | 비중 | 주요 매입처 |
+DX 부문 | 모바일AP 솔루션 | CPU | 138,272 | 18.5% | Qualcomm, MediaTek |
+디스플레이 패널 | TVㆍ모니터용 화면표시장치 | 79,606 | 10.7% | CSOT, SDP 등 |
+기타 | - | 468,772 | 62.9% | |
+소 계 | 745,693 | 100.0% | |
+DS 부문 | Chemical | 원판 가공 | 29,900 | 17.1% | 솔브레인㈜, 동우화인켐㈜ 등 |
+기타 | - | 122,907 | 70.5% | |
+소 계 | 174,432 | 100.0% | |
+※ 원재료 가격은 부문 등 간의 내부거래 등을 포함하고 있습니다. |
+라. 생산설비 및 투자 현황 등
+(2) 주요 투자 현황2022년 주요투자 현황 및 2023년 계획은 아래표를 참조하여 주시기 바랍니다.
+(단위: 억원)
+사업부문 | 구 분 | 2023년 계획 | 2022년 실적 | 2021년 실적 | 2020년 실적 |
+차량부문 | R&D투자 | 41,502 | 35,268 | 30,939 | 28,784 |
+합 계 | 105,267 | 84,897 | 75,370 | 84,190 |
+4. 매출 및 수주상황
+x | 1 |
+III. 재무에 관한 사항
+1. 요약재무정보
+x | 1 |
+"""
+
+
+def test_material_and_fin():
+    m = pt.material_table(rp.parse_report(MAT))
+    check(m["total"] == 745693 + 174432 and m["unit"] == "억원" and m["line_total"] is None, "삼성전자 모양: 합계 줄이 없으면 부문 소계를 더함")
+    check(m["items"][0][0] == "모바일AP 솔루션 · CPU" and m["items"][0][2] == 18.5 and all("기타" not in i[0] for i in m["items"]), "품목 큰 순, '기타' 뺌")
+    eco = MAT.replace("부 문 | 품 목 | 구체적 용도 | 매입액 | 비중 | 주요 매입처 |", "품 목 | 구체적 용도 | 매입액 | 비율 |").replace("(단위 : 억원, %) |", "(기준일 : 2025년 12월 31일) | (단위 : 백만원) |")
+    eco = eco.split("DX 부문")[0] + "전구체,리튬 등 | 양극활물질 제조 소재 | 1,906,841 | 98.8% |\n기타 | - | 23,412 | 1.2% |\n합계 | 1,930,253 | 100% |\n4. 매출 및 수주상황\nx | 1 |\nIII. 재무에 관한 사항\n1. 요약재무정보\nx | 1 |\n"
+    e = pt.material_table(rp.parse_report(eco))
+    check(e["total"] == 1930253 and e["unit"] == "백만원" and e["line_total"] and e["items"][0][1] == 1906841, "에코프로비엠 모양: 합계 줄")
+    plan = pt.invest_plan_lines(rp.parse_report(MAT))
+    check(any("41,502" in t for _, t in plan) and any("105,267" in t for _, t in plan), "투자 계획·실적 표 줄 (계산 안 함)")
+    fin_rows = [
+        {"sj_div": "BS", "account_id": "ifrs-full_Liabilities", "account_nm": "부채총계", "thstrm_amount": "100,000", "frmtrm_amount": "90,000"},
+        {"sj_div": "BS", "account_id": "ifrs-full_Equity", "account_nm": "자본총계", "thstrm_amount": "200,000", "frmtrm_amount": "200,000"},
+        {"sj_div": "BS", "account_id": "x", "account_nm": "현금및현금성자산", "thstrm_amount": "30,000", "frmtrm_amount": "20,000"},
+        {"sj_div": "BS", "account_id": "x", "account_nm": "단기차입금", "thstrm_amount": "10,000", "frmtrm_amount": "5,000"},
+        {"sj_div": "BS", "account_id": "x", "account_nm": "사 채", "thstrm_amount": "15,000", "frmtrm_amount": "15,000"},
+        {"sj_div": "BS", "account_id": "x", "account_nm": "단기차입금", "thstrm_amount": "10,000", "frmtrm_amount": "5,000"},
+        {"sj_div": "CF", "account_id": "ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities", "account_nm": "유형자산의 취득", "thstrm_amount": "(40,000)", "frmtrm_amount": "(50,000)"}]
+    f = pt.fin_stats(fin_rows)
+    check(f["now"]["debt_ratio"] == 50.0 and f["prev"]["debt_ratio"] == 45.0 and f["now"]["borrow"] == 25000 and f["now"]["net_borrow"] == -5000, "부채비율·차입금(같은 계정 한 번만)·순차입금")
+    check(f["now"]["capex"] == 40000 and f["prev"]["capex"] == 50000, "유형자산 취득 (괄호 음수를 크기로)")
+    big = lambda x: x.replace("000", "000" + "0" * 8) if x else x  # 원 단위를 억원대로 키움 (괄호 음수 유지)
+    fin = dict(pt.fin_stats([dict(r, thstrm_amount=big(r["thstrm_amount"]), frmtrm_amount=big(r["frmtrm_amount"])) for r in fin_rows]), fs="연결")
+    cards = {c["key"]: c for c in pt.build_cards(rp.parse_report(MAT), None, None, fin_api=lambda: fin)}
+    check(cards["debt"]["value"] == "부채비율 50.0%" and cards["debt"]["change"] == "5%p 상승", "부채비율 카드 (전기말 대비)")
+    check(cards["capex"]["value"] == "4조원" and cards["capex"]["change"] == "20.0% 감소" and any("105,267" in r[1] for r in cards["capex"]["rows"]), "시설투자 카드 (유형자산 취득 + 원문 계획 줄)")
+    check(cards["material"]["value"] == "92조125억원", "원재료 매입액 카드 (억원 단위 표)")
+
+
 def test_api_cards():
     emp_now = {"list": [{"fo_bbm": "DX", "sexdstn": "남", "sm": "1,000", "fyer_salary_totamt": "158,000,000,000", "avrg_cnwk_sdytrn": "12.0"},
                         {"fo_bbm": "DX", "sexdstn": "여", "sm": "1,000", "fyer_salary_totamt": "158,000,000,000", "avrg_cnwk_sdytrn": "10.0"},

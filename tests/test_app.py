@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 import dart_client as dc
 import points as pt
 pt.fetch_api = lambda *a, **k: None  # 가짜: DART 구조화 자료 없음
+pt.fetch_fin = lambda *a, **k: ([], None)  # 가짜: 재무제표 없음
 from test_core import fake_report
 
 ROWS = [{"rcept_no": "20260310000001", "rcept_dt": "20260310", "report_nm": "사업보고서 (2025.12)"},

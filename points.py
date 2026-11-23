@@ -438,6 +438,138 @@ def treasury_stats(jo):
     return {k: sum(to_num(r.get(c)) or 0 for r in pick) for k, c in cols.items()}
 
 
+# ------------------------------------------------------------
+# DART 재무제표 (fnlttSinglAcntAll) — 부채·차입·현금, 시설투자(유형자산의 취득)
+#  산업 취재 도우미 BS_ITEMS·BORROW_NAMES·pick·borrow_total을 옮김 (표준 계정 코드 먼저, 없으면 띄어쓰기 없앤 이름)
+# ------------------------------------------------------------
+FIN_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
+FIN_ITEMS = {  # key: (이름들, 표준 코드들, 재무제표)
+    "liab": (["부채총계"], ["ifrs-full_Liabilities", "ifrs_Liabilities"], ("BS",)),
+    "equity": (["자본총계"], ["ifrs-full_Equity", "ifrs_Equity"], ("BS",)),
+    "cash": (["현금및현금성자산"], ["ifrs-full_CashAndCashEquivalents", "ifrs_CashAndCashEquivalents"], ("BS",)),
+    "capex": (["유형자산의취득", "유형자산취득"], ["ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
+                                       "ifrs-full_PurchaseOfPropertyPlantAndEquipment"], ("CF",)),
+    "intangible": (["무형자산의취득", "무형자산취득"], ["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"], ("CF",)),
+}
+BORROW_NAMES = ["단기차입금", "유동성장기부채", "유동성장기차입금", "유동성사채", "유동성전환사채", "단기사채", "차입금", "유동성차입금",
+                "장기차입금", "비유동차입금", "사채", "장기사채", "전환사채", "신주인수권부사채", "교환사채"]
+
+
+def fetch_fin(call, cache, api_key, corp_code, year, reprt):
+    """재무제표 전체 (연결 먼저, 없으면 별도). -> (행 목록, 'CFS'|'OFS') 또는 ([], None). 6시간 저장."""
+    key = ("fin", corp_code, year, reprt)
+    hit = cache.get(key, 6 * 3600)
+    if hit is not None:
+        return hit
+    out = ([], None)
+    for fs in ("CFS", "OFS"):
+        jo = call(FIN_URL, {"crtfc_key": api_key, "corp_code": corp_code, "bsns_year": str(year), "reprt_code": reprt, "fs_div": fs})
+        rows = (jo or {}).get("list") or []
+        if rows:
+            out = (rows, fs)
+            break
+    return cache.put(key, out)
+
+
+def _nm(r):
+    return re.sub(r"\s+", "", str(r.get("account_nm", "")))
+
+
+def fin_pick(rows, key, col="thstrm_amount"):
+    names, ids, sj = FIN_ITEMS[key]
+    cand = [r for r in rows if str(r.get("account_id", "")).strip() in ids and r.get("sj_div") in sj]
+    if not cand:
+        cand = [r for r in rows if _nm(r) in names and r.get("sj_div") in sj]
+    for r in cand:
+        v = to_num(r.get(col))
+        if v is not None:
+            return abs(v) if key in ("capex", "intangible") else v
+    return None
+
+
+def borrow_sum(rows, col="thstrm_amount"):
+    seen, total = set(), None
+    for r in rows:
+        if r.get("sj_div") != "BS" or _nm(r) not in BORROW_NAMES or _nm(r) in seen:
+            continue
+        v = to_num(r.get(col))
+        if v is None:
+            continue
+        seen.add(_nm(r))
+        total = (total or 0) + abs(v)
+    return total
+
+
+def fin_stats(rows):
+    """재무제표 행 -> {now: {...}, prev: {...}}. 재무상태는 기말 vs 전기말, 현금흐름은 당기(누적) vs 전기 같은 기간(누적)."""
+    out = {}
+    for k, col in (("now", "thstrm_amount"), ("prev", "frmtrm_amount")):
+        d = {key: fin_pick(rows, key, col) for key in FIN_ITEMS}
+        d["borrow"] = borrow_sum(rows, col)
+        d["debt_ratio"] = d["liab"] / d["equity"] * 100 if d["liab"] is not None and d["equity"] else None
+        d["net_borrow"] = d["borrow"] - d["cash"] if d["borrow"] is not None and d["cash"] is not None else None
+        out[k] = d
+    return out
+
+
+# ------------------------------------------------------------
+# 원재료 매입액 (II-3 '주요 원재료' 표)
+# ------------------------------------------------------------
+def material_table(parsed):
+    """II-3의 매입액 표 -> dict(total, unit, items=[(이름, 금액, 비중, 줄)], line_total) 또는 None.
+    표 모양 (확인): 삼성전자 '부 문 | 품 목 | 구체적 용도 | 매입액 | 비중 | 주요 매입처', 소계 줄이 부문마다
+                    현대차 '부문 | 구분 | 매입유형 | 주요품목 | 매입액 | 비율(%) | 비고', 맨 끝 '합 계 | 740,872 | 100.0 |'
+                    에코프로비엠 '품 목 | 구체적 용도 | 매입액 | 비율 |', '합계 | 1,930,253 | 100% |'"""
+    lines = block_lines(parsed, "biz_plant")
+    start, unit = None, None
+    for i, (no, t) in enumerate(lines):
+        if "단위" in t:
+            unit = unit_of(t)[0] or unit or (re.search(r"단위\s*[:：]?\s*(억원|백만원|천원|원)", t) or [None, None])[1]
+        if "|" in t and "매입액" in t and start is None:
+            start = i
+            break
+    if start is None:
+        return None
+    items, subtotal, total, line_total = [], [], None, None
+    for no, t in lines[start + 1:]:
+        if "|" not in t:
+            break  # 표 끝
+        c = cells(t)
+        nums = [(j, to_num(x)) for j, x in enumerate(c) if to_num(x) is not None]
+        if not nums:
+            continue
+        texts = [x for x in c[:nums[0][0]] if x and x != "-"]
+        flat = re.sub(r"\s+", "", " ".join(texts))
+        amount = nums[0][1]
+        share = nums[1][1] if len(nums) > 1 and nums[1][1] is not None and nums[1][1] <= 100 else None
+        if any(w in flat for w in ("합계", "총계")):
+            total, line_total = amount, no
+        elif "소계" in flat:
+            subtotal.append(amount)
+        elif texts and not re.fullmatch(r"기타", texts[-1]):
+            items.append((" · ".join(texts[-2:]) if len(texts) > 1 else texts[0], amount, share, no))
+    if total is None and subtotal:
+        total = sum(subtotal)
+    if total is None and not items:
+        return None
+    items.sort(key=lambda x: -(x[1] or 0))
+    return dict(total=total, unit=unit or "", items=items, line_total=line_total)
+
+
+def invest_plan_lines(parsed, limit=6):
+    """II-3 안의 투자 계획·실적 줄 (계산하지 않고 원문 줄만): '투자' 글이 있고 숫자가 든 표 줄과 그 바로 앞 표 머리."""
+    out = []
+    lines = block_lines(parsed, "biz_plant")
+    for i, (no, t) in enumerate(lines):
+        if "투자" in t and ("계획" in t or "실적" in t or "현황" in t) and re.search(r"\d", t):
+            for no2, t2 in lines[i:i + 8]:
+                if "|" in t2 and re.search(r"\d", t2):
+                    out.append((no2, t2[:200]))
+                if len(out) >= limit:
+                    return out
+    return out
+
+
 def reprt_of(row):
     """보고서 행 -> (사업연도, 보고서 코드). 분기는 3월=1분기(11013), 9월=3분기(11014)."""
     import dart_client as dc
@@ -467,9 +599,10 @@ def fetch_api(call, cache, api_key, api, corp_code, year, reprt):
 # ------------------------------------------------------------
 # 카드 만들기
 # ------------------------------------------------------------
-def build_cards(parsed, prev_parsed, api, reprt="11011"):
+def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None):
     """parsed: 이번 보고서, prev_parsed: 1년 전 같은 기간 보고서(없으면 None),
     api(name) -> (이번 응답, 1년 전 응답) 를 돌려주는 함수 (없으면 None).
+    fin_api() -> fin_stats 결과 + fs('CFS'|'OFS') (없으면 None).
     -> 카드 목록 (기사 빈도순)."""
     out = []
 
@@ -593,6 +726,43 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
     if hits:
         out.append(card("plant", "가동률 (원문 줄)", rows=[("", t, no) for no, t in hits],
                         note="회사마다 표 모양이 달라 계산하지 않고 원문 줄을 그대로 보여 줘요.", source=rp.REPORT_BLOCK_LABELS["biz_plant"]))
+    # 7-2) 원재료 매입액 (원문 표)
+    mat = material_table(parsed)
+    if mat and mat["total"]:
+        pm = material_table(prev_parsed) if prev_parsed else None
+        rows_m = [(name, money_text(v, mat["unit"]) + (f" · 비중 {sh:g}%" if sh is not None else ""), no) for name, v, sh, no in mat["items"][:5]]
+        out.append(card("material", "원재료 매입액", value=money_text(mat["total"], mat["unit"]),
+                        prev=f"1년 전 같은 기간 {money_text(pm['total'], pm['unit'])}" if pm and pm["total"] else None,
+                        change=change_text(mat["total"], pm["total"]) if pm and pm["total"] and pm["unit"] == mat["unit"] else None,
+                        rows=rows_m, lines=[mat["line_total"]] if mat["line_total"] else [],
+                        note=None if mat["line_total"] else "합계 줄이 없어 부문 소계를 더했어요.", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표"))
+
+    # 7-3) 시설투자: 현금흐름표 '유형자산의 취득'(DART 재무제표) + 원문 투자 계획 줄
+    fin = fin_api() if fin_api else None
+    if fin:
+        f1, f0 = fin["now"], fin["prev"]
+        plan = invest_plan_lines(parsed)
+        if f1["capex"] is not None or plan:
+            rows7 = [("", t, no) for no, t in plan]
+            if f1["intangible"]:
+                rows7.insert(0, ("무형자산 취득", won_text(f1["intangible"]) + (f" (전기 같은 기간 {won_text(f0['intangible'])})" if f0["intangible"] else ""), None))
+            out.append(card("capex", "시설투자 (유형자산의 취득)", value=won_text(f1["capex"]) if f1["capex"] is not None else None,
+                            prev=f"전기 같은 기간 {won_text(f0['capex'])}" if f0["capex"] else None, change=change_text(f1["capex"], f0["capex"]),
+                            rows=rows7, note=("현금흐름표 금액이에요" + ("" if reprt == "11011" else " (그해 초부터 누적)") + "."
+                                  + (" 아래 줄은 원문의 투자 계획·실적 표(계산 안 함)." if plan else "")),
+                            source=f"DART 재무제표({fin['fs']}) · 현금흐름표 + " + rp.REPORT_BLOCK_LABELS["biz_plant"]))
+        # 부채·차입·현금
+        if f1["liab"] is not None and f1["equity"]:
+            rows_d = [("부채총계", won_text(f1["liab"]), None), ("차입금(사채 포함)", won_text(f1["borrow"]) + (f" (전기말 {won_text(f0['borrow'])})" if f0["borrow"] else ""), None),
+                      ("현금및현금성자산", won_text(f1["cash"]) + (f" (전기말 {won_text(f0['cash'])})" if f0["cash"] else ""), None)]
+            if f1["net_borrow"] is not None:
+                rows_d.append(("순차입금(차입금-현금)", won_text(f1["net_borrow"]) if f1["net_borrow"] >= 0 else "순현금 " + won_text(-f1["net_borrow"]), None))
+            out.append(card("debt", "부채비율·차입금·현금", value=f"부채비율 {f1['debt_ratio']:.1f}%",
+                            prev=f"전기말 {f0['debt_ratio']:.1f}%" if f0["debt_ratio"] is not None else None,
+                            change=change_text(f1["debt_ratio"], f0["debt_ratio"], pct=False) if f0["debt_ratio"] is not None else None,
+                            rows=rows_d, note="부채비율 = 부채총계 ÷ 자본총계. 차입금은 단기·장기차입금과 사채 계정을 더한 값(리스부채 제외).",
+                            source=f"DART 재무제표({fin['fs']}) · 재무상태표"))
+
     # 8) R&D
     r = rnd_ratio(parsed)
     if r:

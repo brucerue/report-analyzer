@@ -33,6 +33,12 @@ def _fake(call, cache, key, api, corp_code, year, reprt):
 
 
 pt.fetch_api = _fake
+FIN = [{"sj_div": "BS", "account_id": "ifrs-full_Liabilities", "account_nm": "부채총계", "thstrm_amount": "5,200,000,000,000", "frmtrm_amount": "4,800,000,000,000"},
+       {"sj_div": "BS", "account_id": "ifrs-full_Equity", "account_nm": "자본총계", "thstrm_amount": "6,100,000,000,000", "frmtrm_amount": "6,000,000,000,000"},
+       {"sj_div": "BS", "account_id": "x", "account_nm": "현금및현금성자산", "thstrm_amount": "900,000,000,000", "frmtrm_amount": "1,200,000,000,000"},
+       {"sj_div": "BS", "account_id": "x", "account_nm": "장기차입금", "thstrm_amount": "2,100,000,000,000", "frmtrm_amount": "1,700,000,000,000"},
+       {"sj_div": "CF", "account_id": "x", "account_nm": "유형자산의 취득", "thstrm_amount": "(1,300,000,000,000)", "frmtrm_amount": "(1,900,000,000,000)"}]
+pt.fetch_fin = lambda *a, **k: (FIN, "CFS")
 from test_core import fake_report
 
 ROWS = [{"rcept_no": "20260401000002", "rcept_dt": "20260401", "report_nm": "[기재정정]사업보고서 (2025.12)"},

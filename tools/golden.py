@@ -95,8 +95,12 @@ def show_cards(parsed, corp_code, row, session, cache, key):
                           pt.fetch_api(call, cache, key, name, corp_code, year - 1, reprt))
         return memo[name]
 
+    def fin_api():
+        frows, fs = pt.fetch_fin(lambda url, params: dc.call_dart(session, url, params), cache, key, corp_code, year, reprt)
+        return dict(pt.fin_stats(frows), fs=fs) if frows else None
+
     print("--- 기사 포인트 카드 ---")
-    for c in pt.build_cards(parsed, None, api if year and corp_code else None, reprt or "11011"):
+    for c in pt.build_cards(parsed, None, api if year and corp_code else None, reprt or "11011", fin_api if year and corp_code else None):
         head = f"  [{c['title']}] {c['value'] or ''} | 비교 {c['prev'] or '-'} | {c['change'] or '-'}"
         print(head if not c.get("empty") else f"  [{c['title']}] (없음) {c['empty']}")
         for label, text, line in c["rows"][:6]:
@@ -210,9 +214,9 @@ def main():
         print("  empSttus", c["corp_name"])
         for r in pt.dart_rows(jo, ["sm"])[:30]:
             print("     ", {k: r.get(k) for k in ("fo_bbm", "sexdstn", "rgllbr_co", "cnttk_co", "sm", "avrg_cnwk_sdytrn", "fyer_salary_totamt", "jan_salary_am")})
-    rows = cp.collect(fetch, found, 2025, "11011")
+    rows = cp.collect(fetch, found, 2025, "11011", fin_fetch=lambda code, y, r: pt.fetch_fin(call, cache, key, code, y, r))
     for r in rows:
-        print("  ", r["name"], {k: cp.fmt(k, r.get(k)) for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div")}, r.get("top_pay_who"), r.get("error") or "")
+        print("  ", r["name"], {k: cp.fmt(k, r.get(k)) for k in ("emp", "pay", "top_pay", "holder", "div", "debt_ratio", "borrow", "cash", "capex", "capex_chg")}, r.get("top_pay_who"), r.get("error") or "")
     for k in ("pay", "emp_chg", "top_pay", "div"):
         print("   >", cp.rank_sentence(rows, k))
 

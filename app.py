@@ -15,7 +15,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 16:37"
+LAST_UPDATED = "2026.11.23 17:22"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -135,8 +135,9 @@ def render_multi():
         reprt = cp.KINDS[kind_name][0]
         call = lambda url, params: dc.call_dart(get_session(), url, params)
         fetch = lambda api, code, y, r: pt.fetch_api(call, get_cache(), DART_KEY, api, code, y, r)
+        fin_fetch = lambda code, y, r: pt.fetch_fin(call, get_cache(), DART_KEY, code, y, r)
         with st.spinner(f"{len(found)}곳의 DART 자료를 모으는 중..."):
-            rows = cp.collect(fetch, found, year, reprt)
+            rows = cp.collect(fetch, found, year, reprt, fin_fetch=fin_fetch)
         if with_doc:
             bar = st.progress(0.0, text="원문을 받는 중...")
             for i, (r, (_, c)) in enumerate(zip(rows, found)):
@@ -157,7 +158,7 @@ def render_multi():
     rows = res["rows"]
     keys_all = [m[0] for m in cp.METRICS if res["doc"] or not m[4]]
     have = [k for k in keys_all if any(r.get(k) is not None for r in rows)]
-    default = [k for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div", "rnd", "util", "abroad") if k in have]
+    default = [k for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div", "debt_ratio", "capex", "rnd", "util", "abroad") if k in have]
     shown = st.multiselect("보여 줄 지표", have, default=default, format_func=lambda k: cp.METRIC_BY_KEY[k][1], key="multi_keys")
     if not shown:
         return
@@ -261,8 +262,18 @@ with tab_point:
                 memo[name] = (None, None)
         return memo[name]
 
+    def fin_api():
+        if "fin" not in memo:
+            try:
+                frows, fs = pt.fetch_fin(lambda url, params: dc.call_dart(get_session(), url, params), get_cache(), DART_KEY,
+                                         corp["corp_code"], year, reprt)
+            except dc.DartApiError:
+                frows, fs = [], None
+            memo["fin"] = dict(pt.fin_stats(frows), fs="연결" if fs == "CFS" else "별도") if frows else None
+        return memo["fin"]
+
     with st.spinner("기사 포인트 숫자를 모으는 중..."):
-        items = pt.build_cards(parsed, prev_parsed, api if year else None, reprt or "11011")
+        items = pt.build_cards(parsed, prev_parsed, api if year else None, reprt or "11011", fin_api if year else None)
     ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
     if items:
         ui.cards(items)
