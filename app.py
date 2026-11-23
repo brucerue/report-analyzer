@@ -8,13 +8,14 @@ import requests
 import streamlit as st
 
 import analyses as an
+import compare as cp
 import dart_client as dc
 import plant
 import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 16:21"
+LAST_UPDATED = "2026.11.23 16:32"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -85,6 +86,108 @@ if not DART_KEY:
     st.error("Streamlit Secrets에 DART_API_KEY를 넣어 주세요.")
     st.stop()
 
+MODE_ONE, MODE_MULTI = "회사 하나 깊게 보기", "여러 회사 비교"
+mode = st.radio("보기", [MODE_ONE, MODE_MULTI], horizontal=True, label_visibility="collapsed", key="mode")
+
+
+def fill_group():
+    g = st.session_state.get("multi_group")
+    if g and g in cp.INDUSTRY_GROUPS:
+        st.session_state["multi_names"] = ", ".join(cp.INDUSTRY_GROUPS[g])
+
+
+def pick_report(rows_all, kind_name, year):
+    """회사 보고서 목록에서 고른 종류·연도 보고서 (정정본이면 가장 늦은 것). 없으면 None."""
+    _, month = cp.KINDS[kind_name]
+    want_kind = "사업보고서" if kind_name == "사업보고서" else "반기보고서" if kind_name == "반기보고서" else "분기보고서"
+    for r in dc.latest_versions(rows_all):
+        if dc.report_kind_of(r.get("report_nm")) == want_kind and dc.report_period_of(r.get("report_nm")) == (year, month):
+            return r
+    return None
+
+
+def render_multi():
+    """여러 회사를 같은 기간·같은 지표로 한 표에. 숫자는 DART 자료·원문 표에서만 (AI 없음)."""
+    from datetime import date
+    this_year = date.today().year
+    st.selectbox("업종 묶음으로 채우기 (산업 취재 도우미와 같은 묶음)", ["직접 입력"] + list(cp.INDUSTRY_GROUPS),
+                 key="multi_group", on_change=fill_group)
+    with st.form("multi_form"):
+        names = st.text_area("회사 이름 (쉼표나 줄바꿈으로, 최대 12곳)", key="multi_names", height=90,
+                             placeholder="예: 삼성전자, SK하이닉스, LG전자")
+        c1, c2 = st.columns(2)
+        kind_name = c1.selectbox("보고서", list(cp.KINDS), key="multi_kind")
+        year = c2.selectbox("사업연도", list(range(this_year, this_year - 5, -1)), index=1, key="multi_year")
+        with_doc = st.checkbox("원문 표 지표도 (R&D 비율·가동률·해외 매출 비중) — 회사마다 원문을 받아 1곳에 20~40초 걸려요", key="multi_doc")
+        go_multi = st.form_submit_button("비교하기", type="primary")
+    if go_multi:
+        try:
+            corps_all = get_corps()
+        except Exception:
+            st.error("기업 목록을 받지 못했어요. 잠시 후 다시 시도해 주세요.")
+            return
+        found, missing = cp.resolve(corps_all, cp.split_names(names))
+        if missing:
+            st.warning("못 찾은 회사: " + ", ".join(missing) + " (공시된 이름으로 적어 주세요)")
+        if not found:
+            st.error("비교할 회사를 찾지 못했어요.")
+            return
+        reprt = cp.KINDS[kind_name][0]
+        call = lambda url, params: dc.call_dart(get_session(), url, params)
+        fetch = lambda api, code, y, r: pt.fetch_api(call, get_cache(), DART_KEY, api, code, y, r)
+        with st.spinner(f"{len(found)}곳의 DART 자료를 모으는 중..."):
+            rows = cp.collect(fetch, found, year, reprt)
+        if with_doc:
+            bar = st.progress(0.0, text="원문을 받는 중...")
+            for i, (r, (_, c)) in enumerate(zip(rows, found)):
+                bar.progress(i / len(found), text=f"원문을 받는 중... {c['corp_name']} ({i + 1}/{len(found)})")
+                try:
+                    rep_row = pick_report(dc.periodic_reports(get_session(), get_cache(), DART_KEY, c["corp_code"]), kind_name, year)
+                    if rep_row:
+                        r.update(cp.doc_metrics(get_parsed(str(rep_row["rcept_no"]).strip())))
+                        r["rcept_no"] = rep_row["rcept_no"]
+                except (dc.DartApiError, rp.ParseError) as e:
+                    r["error"] = (r.get("error") or "") + f" 원문: {e}"
+            bar.empty()
+        st.session_state["multi_res"] = dict(rows=rows, year=year, kind=kind_name, doc=with_doc)
+    res = st.session_state.get("multi_res")
+    if not res:
+        ui.note("회사 이름을 넣고 '비교하기'를 누르세요. 업종 묶음을 고르면 이름이 채워져요.")
+        return
+    rows = res["rows"]
+    keys_all = [m[0] for m in cp.METRICS if res["doc"] or not m[4]]
+    have = [k for k in keys_all if any(r.get(k) is not None for r in rows)]
+    default = [k for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div", "rnd", "util", "abroad") if k in have]
+    shown = st.multiselect("보여 줄 지표", have, default=default, format_func=lambda k: cp.METRIC_BY_KEY[k][1], key="multi_keys")
+    if not shown:
+        return
+    sort_key = st.selectbox("순위 기준", shown, format_func=lambda k: cp.METRIC_BY_KEY[k][1], key="multi_sort")
+    ordered = sorted(rows, key=lambda r: (r.get(sort_key) is None, -(r.get(sort_key) or 0)))
+    period = f"{res['year']}년 {res['kind']}"
+    ui.note(f"{period} 기준 · 표 머리를 누르면 다시 정렬돼요 · 금액은 만원·억원")
+    if res["kind"] != "사업보고서" and any(k in shown for k in ("pay", "pay_chg")):
+        ui.note("반기·분기 급여는 그 기간 누적이에요. 증감률은 1년 전 같은 기간 보고서와 비교한 값이에요.")
+    table = cp.table_rows(ordered, shown)
+    num_cols = {k for row in table for k, v in row.items() if isinstance(v, (int, float))}
+    config = {k: st.column_config.NumberColumn(k, format="%.1f" if ("률" in k or "지분" in k or "비율" in k or "비중" in k or "가동률" in k or "근속" in k) else "localized")
+              for k in num_cols}
+    st.dataframe(table, hide_index=True, width="stretch", column_config=config)
+    import csv, io
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=list({k: None for row in table for k in row}))
+    w.writeheader()
+    w.writerows(table)
+    st.download_button("표 내려받기 (CSV)", buf.getvalue().encode("utf-8-sig"), file_name=f"비교_{period}.csv", mime="text/csv")
+    lines = [s for s in (cp.rank_sentence(rows, k) for k in [sort_key] + [k for k in shown if k != sort_key]) if s]
+    if lines:
+        ui.note("순위 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
+        st.code("\n".join([f"({period} 기준) " + lines[0]] + lines[1:]), language=None, wrap_lines=True)
+
+
+if mode == MODE_MULTI:
+    render_multi()
+    st.stop()
+
 with st.form("pick_corp"):
     query = st.text_input("기업명 또는 종목코드", placeholder="예: 삼성전자, 005380")
     go = st.form_submit_button("보고서 찾기", type="primary")
@@ -131,7 +234,7 @@ except (dc.DartApiError, rp.ParseError) as e:
     st.error(str(e))
     st.stop()
 
-tab_point, tab_toc, tab_ai, tab_diff, tab_multi = st.tabs(["기사 포인트", "목차별 보기", "AI 분석", "달라진 문장", "여러 회사 비교"])
+tab_point, tab_toc, tab_ai, tab_diff = st.tabs(["기사 포인트", "목차별 보기", "AI 분석", "달라진 문장"])
 
 # ---------------- 기사 포인트 (2단계에서 숫자 카드로) ----------------
 with tab_point:
@@ -279,6 +382,3 @@ with tab_diff:
                 if truncated:
                     ui.note(f"바뀐 문장이 많아 앞 {an.MAX_REPORT_CHARS:,}자까지만 AI에 보냈어요.")
 
-# ---------------- 여러 회사 비교 (4단계) ----------------
-with tab_multi:
-    st.info("여러 회사를 한 지표로 나란히 놓는 표(연봉 순위, 가동률 비교 등)는 4단계에서 이 자리에 들어와요.")

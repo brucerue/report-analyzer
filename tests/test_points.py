@@ -55,7 +55,7 @@ def check(cond, msg):
 
 def test_numbers():
     check(pt.to_num("(4,519)") == -4519 and pt.to_num("△1,234") == -1234 and pt.to_num("2.5%") == 2.5 and pt.to_num("-") is None, "숫자 읽기")
-    check(pt.won_text(371_799 * 1e6) == "3,718억원" and pt.won_text(133_274_793 * 1e6) == "133조2748억원" and pt.won_text(1.6144e12) == "1조6144억원" and pt.won_text(158_000_000) == "1억5800만원", "기사체 금액")
+    check(pt.won_text(371_799 * 1e6) == "3718억원" and pt.won_text(70_000_000) == "7000만원" and pt.won_text(133_274_793 * 1e6) == "133조2748억원" and pt.won_text(1.6144e12) == "1조6144억원" and pt.won_text(158_000_000) == "1억5800만원" and pt.won_text(24_840_000_000, man=True) == "248억4000만원" and pt.won_text(24_840_000_000) == "248억원", "기사체 금액 (보수는 만원까지)")
     check(pt.unit_of("(기준일 : | 2025년 | ) | (단위 : 백만원, 천주, %) |") == ("백만원", "천주"), "단위 읽기")
 
 

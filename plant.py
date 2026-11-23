@@ -133,6 +133,8 @@ def _batchim(word):
         if "가" <= ch <= "힣":
             jong = (ord(ch) - 0xAC00) % 28
             return "ㄹ" if jong == 8 else bool(jong)
+        if ch == "%":  # 퍼센트 -> '로', '는'
+            return False
         if ch.isdigit():
             return ch in "013678"  # 영·일·삼·육·칠·팔
         if ch.isalpha():

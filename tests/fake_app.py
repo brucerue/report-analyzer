@@ -21,13 +21,26 @@ FAKE_API = {  # 가짜 DART 구조화 자료 (이름: (올해, 1년 전))
     "hmvAuditIndvdlBySttus": ({"list": [{"nm": "홍길동", "ofcps": "사장", "mendng_totamt": "7,305,000,000"}, {"nm": "부사장\n김철수", "ofcps": "부사장", "mendng_totamt": "743,000,000"}]}, None),
     "alotMatter": ({"list": [{"se": "현금배당금총액(백만원)", "thstrm": "9,782", "frmtrm": "7,000"}, {"se": "주당 현금배당금(원)", "stock_knd": "보통주", "thstrm": "100", "frmtrm": "70"}]}, None),
 }
-pt.fetch_api = lambda call, cache, key, api, corp_code, year, reprt: FAKE_API.get(api, (None, None))[0 if year >= 2025 else 1]
+OTHER = {"00000002": (3, 1.3), "00000003": (0.5, 0.8)}  # 다른 가짜 회사: (직원 배수, 급여 배수)
+
+
+def _fake(call, cache, key, api, corp_code, year, reprt):
+    jo = FAKE_API.get(api, (None, None))[0 if year >= 2025 else 1]
+    if not jo or corp_code not in OTHER or api != "empSttus":
+        return jo
+    n, w = OTHER[corp_code]
+    return {"list": [dict(r, sm=f"{int(pt.to_num(r['sm']) * n):,}", fyer_salary_totamt=f"{int(pt.to_num(r['fyer_salary_totamt']) * n * w):,}") for r in jo["list"]]}
+
+
+pt.fetch_api = _fake
 from test_core import fake_report
 
 ROWS = [{"rcept_no": "20260401000002", "rcept_dt": "20260401", "report_nm": "[기재정정]사업보고서 (2025.12)"},
         {"rcept_no": "20260310000001", "rcept_dt": "20260310", "report_nm": "사업보고서 (2025.12)"},
         {"rcept_no": "20250311000004", "rcept_dt": "20250311", "report_nm": "사업보고서 (2024.12)"}]
-dc.load_corp_list = lambda s: [{"corp_code": "00126380", "corp_name": "가나전지", "stock_code": "123456"}]
+dc.load_corp_list = lambda s: [{"corp_code": "00126380", "corp_name": "가나전지", "stock_code": "123456"},
+                               {"corp_code": "00000002", "corp_name": "다라모터스", "stock_code": "654321"},
+                               {"corp_code": "00000003", "corp_name": "마바화학", "stock_code": "111111"}]
 dc.periodic_reports = lambda *a, **k: ROWS
 dc.report_text = lambda s, c, key, rno: fake_report(
     rate="47.2" if rno.startswith("2026") else "60.1",

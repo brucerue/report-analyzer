@@ -39,3 +39,22 @@ assert not at.exception, at.exception
 assert any("ra-answer" in m.value for m in at.markdown), "AI 답 보이기"
 print("ok - AI 분석 버튼까지 오류 없음 (가짜 AI 답)")
 print("ok - 화면이 오류 없이 끝까지 그려짐 (목록·목차별 원문·달라진 문장)")
+
+# ---- 여러 회사 비교 ----
+import streamlit as st
+st.cache_resource.clear()  # 앞 시험의 기업 목록 저장값을 지운다
+dc.load_corp_list = lambda s: [{"corp_code": "A", "corp_name": "가나전지", "stock_code": "1"},
+                               {"corp_code": "B", "corp_name": "다라전자", "stock_code": "2"}]
+EMP = {"A": (1000, 158_000_000_000), "B": (500, 92_500_000_000)}
+pt.fetch_api = lambda call, cache, key, api, code, year, reprt: (
+    {"list": [{"fo_bbm": "전사", "sexdstn": "남", "sm": str(EMP[code][0]), "fyer_salary_totamt": str(EMP[code][1])}]} if api == "empSttus" else None)
+at = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "app.py"), default_timeout=30).run()
+at.radio(key="mode").set_value("여러 회사 비교").run()
+at.text_area(key="multi_names").input("가나전지, 다라전자, 없는회사")
+next(b for b in at.button if b.label == "비교하기").click().run()
+assert not at.exception, at.exception
+assert any("없는회사" in w.value for w in at.warning), "못 찾은 회사 안내"
+assert len(at.dataframe) == 1, "비교 표"
+codes = " ".join(c.value for c in at.code)
+assert "1인 평균 급여는 다라전자가 1억8500만원으로 가장 많았고, 가나전지(1억5800만원) 순이었다." in codes, codes
+print("ok - 여러 회사 비교: 표와 순위 문장")

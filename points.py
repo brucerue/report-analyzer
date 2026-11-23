@@ -39,20 +39,21 @@ def to_num(x):
     return int(v) if v.is_integer() else v
 
 
-def won_text(v):
-    """원 -> 기사체 (1조2345억원 / 7200억원 / 3억5000만원 / 1,234원)."""
+def won_text(v, man=False):
+    """원 -> 기사체 (1조2345억원 / 7200억원 / 3억5000만원 / 1,234원).
+    man=True(보수·급여)면 반올림하지 않고 억 아래 만원까지 (248억4000만원)."""
     if v is None:
         return "-"
     sign, v = ("-" if v < 0 else ""), abs(v)
-    if v >= 1e10:  # 100억원 이상은 억 단위로 반올림 (기사 표기)
+    if v >= 1e10 and not man:  # 100억원 이상은 억 단위로 반올림 (기사 표기)
         v = round(v / 1e8) * 1e8
-    jo, eok, man = int(v // 1e12), int(v % 1e12 // 1e8), int(v % 1e8 // 1e4)
-    if jo:
+    jo, eok, mn = int(v // 1e12), int(v % 1e12 // 1e8), int(v % 1e8 // 1e4)
+    if jo:  # 기사 표기: 억·만 앞엔 쉼표를 쓰지 않는다 (7200억원, 7000만원)
         return f"{sign}{jo:,}조" + (f"{eok}억원" if eok else "원")
     if eok:
-        return f"{sign}{eok:,}억" + (f"{man}만원" if man and eok < 100 else "원")
-    if man:
-        return f"{sign}{man:,}만원"
+        return f"{sign}{eok}억" + (f"{mn}만원" if mn and (eok < 100 or man) else "원")
+    if mn:
+        return f"{sign}{mn}만원"
     return f"{sign}{int(v):,}원"
 
 
@@ -511,8 +512,8 @@ def build_cards(parsed, prev_parsed, api, reprt="11011"):
         a1, b1 = api("hmvAuditIndvdlBySttus")[0], api("indvdlByPay")[0]
         top = top_pay(a1, b1)
         if top:
-            out.append(card("pay", "보수 5억원 이상 (상위)", value=f"{top[0][0]} {won_text(top[0][2])}",
-                            rows=[(f"{n} {p}".strip(), won_text(a), None) for n, p, a in top[:5]],
+            out.append(card("pay", "보수 5억원 이상 (상위)", value=f"{top[0][0]} {won_text(top[0][2], man=True)}",
+                            rows=[(f"{n} {p}".strip(), won_text(a, man=True), None) for n, p, a in top[:5]],
                             source="DART 정기보고서 주요정보 · 개인별 보수", lines=[rp.block_first_line(parsed, "staff_pay")]))
         # 5) 최대주주·소액주주
         h1, h0 = holder_stats(api("hyslrSttus")[0]), holder_stats(api("hyslrSttus")[1])

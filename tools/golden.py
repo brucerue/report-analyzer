@@ -200,6 +200,17 @@ def main():
     else:
         problems.append("정정본: 후보 회사들에서 정정 보고서를 못 찾음")
 
+    print("\n==================== 여러 회사 비교 (반도체·전자 2025 사업보고서) ====================")
+    import compare as cp
+    found, missing = cp.resolve(corps, ["삼성전자", "SK하이닉스", "LG전자", "삼성전기"])
+    call = lambda url, params: dc.call_dart(session, url, params)
+    fetch = lambda api, code, y, r: pt.fetch_api(call, cache, key, api, code, y, r)
+    rows = cp.collect(fetch, found, 2025, "11011")
+    for r in rows:
+        print("  ", r["name"], {k: cp.fmt(k, r.get(k)) for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div")}, r.get("top_pay_who"), r.get("error") or "")
+    for k in ("pay", "emp_chg", "top_pay", "div"):
+        print("   >", cp.rank_sentence(rows, k))
+
     print("\n==================== 요약 ====================")
     for name, r in results.items():
         print(f"{name}: {r['corp']} {r['report']} 대분류 {len(r['mains'])}개, 블록 {len(r['blocks'])}개")

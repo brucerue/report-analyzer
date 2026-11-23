@@ -15,4 +15,5 @@ jobs:
       - run: python tests/test_core.py
       - run: python tests/test_points.py
       - run: python tests/test_plant.py
+      - run: python tests/test_compare.py
       - run: python tests/test_app.py
