@@ -37,6 +37,11 @@ MAX_CORPS = 12
 
 # 지표: key, 이름, 단위 표시, 큰 값이 '많다/높다' 중 어느 말인지, 원문 지표인지
 METRICS = [
+    ("rev", "매출", "원", "많", False),
+    ("rev_chg", "매출 증감률", "%", "높", False),
+    ("op", "영업이익", "원", "많", False),
+    ("op_chg", "영업이익 증감률", "%", "높", False),
+    ("op_margin", "영업이익률", "%", "높", False),
     ("emp", "직원 수", "명", "많", False),
     ("emp_chg", "직원 수 증감률", "%", "높", False),
     ("pay", "1인 평균 급여", "원", "많", False),
@@ -132,8 +137,15 @@ def fin_metrics(fin_fetch, corp_code, year, reprt):
         return {}
     f = pt.fin_stats(rows)
     n, p = f["now"], f["prev"]
+    inc = f["income"]["cum"]
+    i1, i0 = inc["now"], inc["prev"]
+    both_pos = i1["op"] is not None and i0["op"] is not None and i1["op"] > 0 and i0["op"] > 0
     return {"debt_ratio": n["debt_ratio"], "borrow": n["borrow"], "cash": n["cash"], "capex": n["capex"],
-            "capex_chg": pct_change(n["capex"], p["capex"]), "fs": "연결" if fs == "CFS" else "별도"}
+            "capex_chg": pct_change(n["capex"], p["capex"]), "fs": "연결" if fs == "CFS" else "별도",
+            "rev": i1["rev"], "rev_chg": pct_change(i1["rev"], i0["rev"]), "op": i1["op"],
+            "op_chg": pct_change(i1["op"], i0["op"]) if both_pos else None,  # 흑자·적자가 바뀌면 %가 뜻이 없어 비움
+            "op_turn": pt.profit_change(i1["op"], i0["op"]) if not both_pos else None,
+            "op_margin": i1["op"] / i1["rev"] * 100 if i1["op"] is not None and i1["rev"] else None}
 
 
 def collect(fetch, corps, year, reprt, workers=6, fin_fetch=None):
@@ -200,7 +212,7 @@ def rank_sentence(rows, key, top_n=3, label=None):
     return s
 
 
-SCALE = {"pay": (1e4, " (만원)"), "top_pay": (1e4, " (만원)"), "div": (1e8, " (억원)"), "dps": (1, " (원)"),
+SCALE = {"rev": (1e8, " (억원)"), "op": (1e8, " (억원)"), "pay": (1e4, " (만원)"), "top_pay": (1e4, " (만원)"), "div": (1e8, " (억원)"), "dps": (1, " (원)"),
          "borrow": (1e8, " (억원)"), "cash": (1e8, " (억원)"), "capex": (1e8, " (억원)")}
 
 
@@ -217,6 +229,8 @@ def table_rows(rows, keys):
             elif v is not None and isinstance(v, float):
                 v = round(v, 2)
             row[METRIC_BY_KEY[k][1] + suffix] = v
+        if "op_chg" in keys and r.get("op_turn"):
+            row["영업이익 전환"] = r["op_turn"]
         if "top_pay" in keys:
             row["최고 보수 받은 사람"] = r.get("top_pay_who") or "-"
         if "util" in keys:

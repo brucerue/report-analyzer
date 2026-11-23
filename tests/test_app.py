@@ -17,7 +17,7 @@ ROWS = [{"rcept_no": "20260310000001", "rcept_dt": "20260310", "report_nm": "사
         {"rcept_no": "20250311000004", "rcept_dt": "20250311", "report_nm": "사업보고서 (2024.12)"}]
 dc.load_corp_list = lambda s: [{"corp_code": "00126380", "corp_name": "가나전지", "stock_code": "123456"}]
 dc.periodic_reports = lambda *a, **k: ROWS
-dc.report_text = lambda s, c, key, rno: fake_report(rate="47.2" if rno.startswith("2026") else "60.1",
+dc.report_text = lambda s, c, key, rno, **k: fake_report(rate="47.2" if rno.startswith("2026") else "60.1",
                                                     new_line="당사는 로봇용 배터리로 사업 영역을 확대하고 있습니다." if rno.startswith("2026") else "")
 
 at = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "app.py"), default_timeout=30).run()
@@ -59,3 +59,26 @@ assert len(at.dataframe) == 1, "비교 표"
 codes = " ".join(c.value for c in at.code)
 assert "1인 평균 급여는 다라전자가 1억8500만원으로 가장 많았고, 가나전지(1억5800만원) 순이었다." in codes, codes
 print("ok - 여러 회사 비교: 표와 순위 문장")
+
+# ---- 원문을 못 받아도 빠른 카드는 보이고, 다른 탭은 안내 ----
+st.cache_resource.clear()
+dc.load_corp_list = lambda s: [{"corp_code": "00126380", "corp_name": "가나전지", "stock_code": "123456"}]
+
+
+def _slow(*a, **k):
+    raise dc.DartApiError("DART 원문 내려받기가 90초를 넘어 멈췄어요 (3.0MB 받음).")
+
+
+dc.report_text = _slow
+pt.fetch_api = lambda *a, **k: None
+pt.fetch_fin = lambda *a, **k: ([{"sj_div": "CIS", "account_id": "dart_OperatingIncomeLoss", "account_nm": "영업이익", "thstrm_amount": "500000000000", "frmtrm_amount": "400000000000"},
+                                 {"sj_div": "CIS", "account_id": "ifrs-full_Revenue", "account_nm": "매출액", "thstrm_amount": "9000000000000", "frmtrm_amount": "8000000000000"}], "CFS")
+at = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "app.py"), default_timeout=30).run()
+at.text_input[0].input("가나전지")
+at.button[0].click().run()
+assert not at.exception, at.exception
+html_all = " ".join(str(h.proto) for h in at.get("html"))
+assert "영업이익 5000억원" in html_all, "실적 카드는 원문 없이 먼저"
+assert any("90초를 넘어" in e.value for e in at.error), "원문 오류 안내"
+assert any("원문을 받지 못해" in i.value for i in at.info), "다른 탭 안내"
+print("ok - 원문을 못 받아도 빠른 카드(실적)는 보이고 다른 탭은 안내")

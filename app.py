@@ -15,7 +15,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 17:36"
+LAST_UPDATED = "2026.11.23 17:42"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -51,11 +51,28 @@ def get_corps():
     return dc.load_corp_list(get_session())
 
 
-@st.cache_resource(max_entries=12, show_spinner=False)
+@st.cache_resource
+def _parsed_store():
+    return dc.Cache(max_items=12)  # 나눈 보고서 (원문은 dart_client가 메모리·디스크에 일주일)
+
+
+class _Parsed:
+    def get(self, rno):
+        return _parsed_store().get(("parsed", rno), 7 * 24 * 3600)
+
+    def put(self, rno, v):
+        return _parsed_store().put(("parsed", rno), v)
+
+
+PARSED = _Parsed()
+
+
 def get_parsed(rcept_no):
-    """접수번호 -> 나눈 보고서 (원문은 dart_client 저장소에 일주일)."""
-    text = dc.report_text(get_session(), get_cache(), DART_KEY, rcept_no)
-    return rp.parse_report(text)
+    """접수번호 -> 나눈 보고서 (여러 회사 비교에서 씀. 진행 표시 없이)."""
+    hit = PARSED.get(rcept_no)
+    if hit is None:
+        hit = PARSED.put(rcept_no, rp.parse_report(dc.report_text(get_session(), get_cache(), DART_KEY, rcept_no)))
+    return hit
 
 
 def filed_on(r):
@@ -158,7 +175,7 @@ def render_multi():
     rows = res["rows"]
     keys_all = [m[0] for m in cp.METRICS if res["doc"] or not m[4]]
     have = [k for k in keys_all if any(r.get(k) is not None for r in rows)]
-    default = [k for k in ("emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div", "debt_ratio", "capex", "rnd", "util", "abroad") if k in have]
+    default = [k for k in ("rev", "rev_chg", "op", "op_margin", "emp", "emp_chg", "pay", "pay_chg", "top_pay", "holder", "minor", "div", "debt_ratio", "capex", "rnd", "util", "abroad") if k in have]
     shown = st.multiselect("보여 줄 지표", have, default=default, format_func=lambda k: cp.METRIC_BY_KEY[k][1], key="multi_keys")
     if not shown:
         return
@@ -230,77 +247,101 @@ row = rows[ri]
 rno = str(row["rcept_no"]).strip()
 ui.cover(corp, dc.strip_correction(row.get("report_nm")), filed_on(row), row.get("versions", 1), None, dc.DART_VIEW_URL.format(rno))
 
-try:
-    with st.spinner("보고서 원문을 받아 목차별로 나누는 중... (처음 받는 보고서는 20~40초)"):
-        parsed = get_parsed(rno)
-except (dc.DartApiError, rp.ParseError) as e:
-    st.error(str(e))
-    st.stop()
+def load_parsed(rcept_no, label):
+    """원문을 받아 나눈다. 받는 동안 진행 표시 (90초를 넘기면 dart_client가 끊고 DartApiError). -> (parsed, 오류 글)"""
+    hit = PARSED.get(rcept_no)
+    if hit is not None:
+        return hit, None
+    bar = st.progress(0.0, text=f"{label} 원문을 받는 중...")
+
+    def progress(nbytes, spent):
+        bar.progress(min(spent / dc.DOC_DEADLINE, 0.99), text=f"{label} 원문을 받는 중... {nbytes / 1e6:.1f}MB · {spent:.0f}초 (90초를 넘기면 멈춰요)")
+
+    try:
+        text = dc.report_text(get_session(), get_cache(), DART_KEY, rcept_no, progress=progress)
+        parsed = rp.parse_report(text)
+    except (dc.DartApiError, rp.ParseError) as e:
+        bar.empty()
+        return None, str(e)
+    bar.empty()
+    PARSED.put(rcept_no, parsed)
+    return parsed, None
+
 
 tab_point, tab_toc, tab_ai, tab_diff = st.tabs(["기사 포인트", "목차별 보기", "AI 분석", "달라진 문장"])
+year, reprt = pt.reprt_of(row)
+memo = {}
 
-# ---------------- 기사 포인트 (2단계에서 숫자 카드로) ----------------
-with tab_point:
-    year, reprt = pt.reprt_of(row)
-    prev_row = dc.find_prev_periodic(rows, row)
-    prev_parsed = None
-    if prev_row:
+
+def api(name):
+    if name not in memo:
+        call = lambda url, params: dc.call_dart(get_session(), url, params)
         try:
-            with st.spinner("1년 전 같은 기간 보고서도 받아 비교하는 중..."):
-                prev_parsed = get_parsed(str(prev_row["rcept_no"]).strip())
-        except (dc.DartApiError, rp.ParseError):
-            prev_parsed = None
-    memo = {}
+            memo[name] = (pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year, reprt),
+                          pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year - 1, reprt))
+        except dc.DartApiError:
+            memo[name] = (None, None)
+    return memo[name]
 
-    def api(name):
-        if name not in memo:
-            call = lambda url, params: dc.call_dart(get_session(), url, params)
-            try:
-                memo[name] = (pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year, reprt),
-                              pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year - 1, reprt))
-            except dc.DartApiError:
-                memo[name] = (None, None)
-        return memo[name]
 
-    def fin_api():
-        if "fin" not in memo:
-            try:
-                frows, fs = pt.fetch_fin(lambda url, params: dc.call_dart(get_session(), url, params), get_cache(), DART_KEY,
-                                         corp["corp_code"], year, reprt)
-            except dc.DartApiError:
-                frows, fs = [], None
-            memo["fin"] = dict(pt.fin_stats(frows), fs="연결" if fs == "CFS" else "별도") if frows else None
-        return memo["fin"]
+def fin_api():
+    if "fin" not in memo:
+        try:
+            frows, fs = pt.fetch_fin(lambda url, params: dc.call_dart(get_session(), url, params), get_cache(), DART_KEY,
+                                     corp["corp_code"], year, reprt)
+        except dc.DartApiError:
+            frows, fs = [], None
+        memo["fin"] = dict(pt.fin_stats(frows), fs="연결" if fs == "CFS" else "별도") if frows else None
+    return memo["fin"]
 
-    with st.spinner("기사 포인트 숫자를 모으는 중..."):
-        items = pt.build_cards(parsed, prev_parsed, api if year else None, reprt or "11011", fin_api if year else None)
-    ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
-    if items:
-        ui.cards(items)
-        cite = sorted({ln for c in items for ln in ([r[2] for r in c["rows"]] + c["lines"]) if ln})
+
+# ---------------- 기사 포인트: 1) DART 자료로 바로 나오는 카드 ----------------
+with tab_point:
+    prev_row = dc.find_prev_periodic(rows, row)
+    ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 재무제표·구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
+    with st.spinner("DART 자료로 숫자를 모으는 중..."):
+        fast = pt.build_cards(None, None, api if year else None, reprt or "11011", fin_api if year else None, part="fast")
+    if fast:
+        ui.cards(fast)
+    doc_area = st.container()
+
+# ---------------- 2) 원문을 받아 나머지 ----------------
+with doc_area:
+    parsed, doc_err = load_parsed(rno, "이번 보고서")
+    prev_parsed = None
+    if parsed is not None and prev_row:
+        prev_parsed, _ = load_parsed(str(prev_row["rcept_no"]).strip(), "1년 전 같은 기간 보고서")
+    if parsed is None:
+        st.error(doc_err)
+    else:
+        items = pt.build_cards(parsed, prev_parsed, None, reprt or "11011", None, part="doc")
+        if items:
+            ui.cards(items)
+        cite = sorted({ln for c in fast + items for ln in ([r[2] for r in c["rows"]] + c["lines"]) if ln})
         if cite:
             with st.expander(f"카드 근거 줄 원문 보기 ({len(cite)}곳)"):
                 ui.legend(marker_text="카드가 가리킨 줄")
                 ui.sheet(ui.around_rows(parsed["lines"], set(cite[:40]), width=2))
-    else:
-        st.info("이 보고서에서 카드로 만들 숫자를 찾지 못했어요. '목차별 보기'에서 원문을 확인해 주세요.")
-    pres = plant.compare(parsed, prev_parsed)
-    if pres["sets"]:
-        st.markdown("#### 공장별 가동률")
-        ui.note("보고서의 '생산능력 | 생산실적 | 가동률' 표를 읽었어요. 1년 전은 같은 기간 보고서의 같은 공장끼리 비교해요.")
-        for one in pres["sets"]:
-            ui.plant_table(one)
-            lines = plant.sentences(one, period_phrase(row), annual="사업" in dc.report_kind_of(row.get("report_nm")))
-            if lines:
-                ui.note("기사용 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
-                st.code("\n".join(lines), language=None, wrap_lines=True)
-    found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
-    missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
-    with st.expander(f"이 보고서에서 찾은 부분 {len(found)}개 (원문 전체 {len(parsed['lines']):,}줄)"):
-        ui.parts_list(found, missing)
+        if not fast and not items:
+            st.info("이 보고서에서 카드로 만들 숫자를 찾지 못했어요. '목차별 보기'에서 원문을 확인해 주세요.")
+        pres = plant.compare(parsed, prev_parsed)
+        if pres["sets"]:
+            st.markdown("#### 공장별 가동률")
+            ui.note("보고서의 '생산능력 | 생산실적 | 가동률' 표를 읽었어요. 1년 전은 같은 기간 보고서의 같은 공장끼리 비교해요.")
+            for one in pres["sets"]:
+                ui.plant_table(one)
+                lines = plant.sentences(one, period_phrase(row), annual="사업" in dc.report_kind_of(row.get("report_nm")))
+                if lines:
+                    ui.note("기사용 문장 (숫자로만 만든 초안 · 오른쪽 위 단추로 복사)")
+                    st.code("\n".join(lines), language=None, wrap_lines=True)
+        found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
+        missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
+        with st.expander(f"이 보고서에서 찾은 부분 {len(found)}개 (원문 전체 {len(parsed['lines']):,}줄)"):
+            ui.parts_list(found, missing)
+
 
 # ---------------- 목차별 보기 ----------------
-with tab_toc:
+def render_toc(parsed):
     keys = [k for k, _ in rp.REPORT_MAIN_SECTIONS if k in parsed["mains"]]
     mk = st.selectbox("목차", keys, format_func=lambda k: rp.MAIN_LABELS[k])
     i, j = parsed["mains"][mk]
@@ -314,7 +355,7 @@ with tab_toc:
         ui.sheet(ui.numbered_rows(rp.main_text(parsed, mk, numbered=True, cap=200000)))
 
 # ---------------- AI 분석 ----------------
-with tab_ai:
+def render_ai(parsed):
     if not GEMINI_KEY:
         st.info("AI 분석을 쓰려면 Streamlit Secrets에 GEMINI_API_KEY를 넣어 주세요.")
     else:
@@ -359,7 +400,7 @@ with tab_ai:
                 ui.note(n)
 
 # ---------------- 달라진 문장 ----------------
-with tab_diff:
+def render_diff(parsed):
     mode = st.radio("비교 대상", ["1년 전 같은 기간", "바로 앞 보고서"], horizontal=True)
     prev = dc.find_prev_periodic(rows, row) if mode.startswith("1년") else dc.find_prev_quarter(rows, row)
     if not prev:
@@ -395,3 +436,10 @@ with tab_diff:
                 if truncated:
                     ui.note(f"바뀐 문장이 많아 앞 {an.MAX_REPORT_CHARS:,}자까지만 AI에 보냈어요.")
 
+
+for tab, fn in ((tab_toc, render_toc), (tab_ai, render_ai), (tab_diff, render_diff)):
+    with tab:
+        if parsed is None:
+            st.info("원문을 받지 못해 이 탭은 비어 있어요. 위 '기사 포인트'의 안내를 보고 잠시 뒤 다시 열어 주세요.")
+        else:
+            fn(parsed)

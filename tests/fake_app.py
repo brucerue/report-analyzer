@@ -37,7 +37,10 @@ FIN = [{"sj_div": "BS", "account_id": "ifrs-full_Liabilities", "account_nm": "�
        {"sj_div": "BS", "account_id": "ifrs-full_Equity", "account_nm": "자본총계", "thstrm_amount": "6,100,000,000,000", "frmtrm_amount": "6,000,000,000,000"},
        {"sj_div": "BS", "account_id": "x", "account_nm": "현금및현금성자산", "thstrm_amount": "900,000,000,000", "frmtrm_amount": "1,200,000,000,000"},
        {"sj_div": "BS", "account_id": "x", "account_nm": "장기차입금", "thstrm_amount": "2,100,000,000,000", "frmtrm_amount": "1,700,000,000,000"},
-       {"sj_div": "CF", "account_id": "x", "account_nm": "유형자산의 취득", "thstrm_amount": "(1,300,000,000,000)", "frmtrm_amount": "(1,900,000,000,000)"}]
+       {"sj_div": "CF", "account_id": "x", "account_nm": "유형자산의 취득", "thstrm_amount": "(1,300,000,000,000)", "frmtrm_amount": "(1,900,000,000,000)"},
+       {"sj_div": "CIS", "account_id": "ifrs-full_Revenue", "account_nm": "매출액", "thstrm_amount": "2,531,000,000,000", "frmtrm_amount": "2,774,000,000,000"},
+       {"sj_div": "CIS", "account_id": "dart_OperatingIncomeLoss", "account_nm": "영업이익", "thstrm_amount": "-34,000,000,000", "frmtrm_amount": "112,000,000,000"},
+       {"sj_div": "CIS", "account_id": "ifrs-full_ProfitLoss", "account_nm": "당기순이익(손실)", "thstrm_amount": "-81,000,000,000", "frmtrm_amount": "54,000,000,000"}]
 pt.fetch_fin = lambda *a, **k: (FIN, "CFS")
 from test_core import fake_report
 
@@ -48,7 +51,7 @@ dc.load_corp_list = lambda s: [{"corp_code": "00126380", "corp_name": "가나전
                                {"corp_code": "00000002", "corp_name": "다라모터스", "stock_code": "654321"},
                                {"corp_code": "00000003", "corp_name": "마바화학", "stock_code": "111111"}]
 dc.periodic_reports = lambda *a, **k: ROWS
-dc.report_text = lambda s, c, key, rno: fake_report(
+dc.report_text = lambda s, c, key, rno, **k: fake_report(
     rate="47.2" if rno.startswith("2026") else "60.1",
     new_line="당사는 로봇과 우주항공용 배터리로 사업 영역을 확대하고 있습니다." if rno.startswith("2026") else "당사는 ESS 사업을 축소하고 있습니다.")
 an.call_gemini = lambda *a, **k: (
@@ -60,5 +63,5 @@ an.call_gemini = lambda *a, **k: (
 from test_plant import NOW, PREV  # 현대차 3분기 모양 가동률 표
 _orig = dc.report_text
 PLANT = "3. 원재료 및 생산설비\n(3) 가동률\n| (단위 : 대, 시간) |\n사업부문 | 법인명 | 소재지 | 기간 |\n생산능력 | 생산실적 | 가동률(%) |\n{rows}\n"
-dc.report_text = lambda s, c, key, rno: _orig(s, c, key, rno).replace("3. 원재료 및 생산설비\n", PLANT.format(rows=NOW if rno.startswith("2026") else PREV), 1)
+dc.report_text = lambda s, c, key, rno, **k: _orig(s, c, key, rno).replace("3. 원재료 및 생산설비\n", PLANT.format(rows=NOW if rno.startswith("2026") else PREV), 1)
 runpy.run_path(os.path.join(HERE, "..", "app.py"), run_name="__main__")

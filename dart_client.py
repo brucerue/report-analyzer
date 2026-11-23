@@ -3,8 +3,10 @@
 산업 취재 도우미(DART-Joongang app.py)의 call_dart · doc_text_from_zip · download_document · periodic_reports ·
 find_prev_periodic · strip_correction을 옮겨 왔다. Streamlit에 기대지 않는다 (키·세션·저장소는 인자로 받음).
 """
+import gzip
 import html
 import io
+import os
 import re
 import time
 import zipfile
@@ -15,7 +17,9 @@ DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 DART_DOC_URL = "https://opendart.fss.or.kr/api/document.xml"
 CORP_LIST_URL = "https://raw.githubusercontent.com/brucerue/DART-Joongang/corp-codes/corp_codes.csv"  # 공개, 토큰 불필요
 REQUEST_TIMEOUT = 20
-DOC_TIMEOUT = 60
+DOC_TIMEOUT = (10, 30)  # (연결, 조각 사이) 초
+DOC_DEADLINE = 90  # 원문 하나를 받는 최대 시간(초). DART가 아주 느리게 조금씩 보내면 무한정 기다리지 않게 끊는다
+DISK_DIR = os.environ.get("RA_CACHE_DIR", "/tmp/report-analyzer-cache")  # 받은 원문을 압축해 두는 곳 (앱이 다시 켜져도 남게)
 REPORT_KINDS = ("사업보고서", "반기보고서", "분기보고서")
 
 
@@ -190,13 +194,27 @@ def doc_text_from_zip(data):
     return "\n\n".join(parts)
 
 
-def download_document(session, api_key, rcept_no):
-    """접수번호 -> 원본파일 zip 바이트. 없거나 오류면 DartApiError."""
+def download_document(session, api_key, rcept_no, progress=None, deadline=DOC_DEADLINE):
+    """접수번호 -> 원본파일 zip 바이트. 없거나 오류면 DartApiError.
+    조각씩 받으며 progress(받은 바이트, 걸린 초)를 부르고, deadline초를 넘기면 끊는다."""
+    start = time.time()
     try:
-        res = session.get(DART_DOC_URL, params={"crtfc_key": api_key, "rcept_no": rcept_no}, timeout=DOC_TIMEOUT)
+        res = session.get(DART_DOC_URL, params={"crtfc_key": api_key, "rcept_no": rcept_no}, timeout=DOC_TIMEOUT, stream=True)
+        buf = bytearray()
+        for chunk in res.iter_content(chunk_size=256 * 1024):
+            buf += chunk
+            spent = time.time() - start
+            if progress:
+                progress(len(buf), spent)
+            if spent > deadline:
+                res.close()
+                raise DartApiError(f"DART 원문 내려받기가 {deadline}초를 넘어 멈췄어요 ({len(buf) / 1e6:.1f}MB 받음). "
+                                   "DART 서버가 느린 것 같아요. 잠시 뒤 다시 열어 주세요. 위의 숫자 카드는 그대로 볼 수 있어요.")
+    except DartApiError:
+        raise
     except Exception as e:
         raise DartApiError("DART 서버 응답이 없거나 늦어지고 있어요. 잠시 후 다시 시도해 주세요.") from e
-    data = res.content or b""
+    data = bytes(buf)
     if not data.startswith(b"PK"):
         msg = data.decode("utf-8", "ignore")
         m = re.search(r"<status>(\d+)</status>", msg) or re.search(r'"status"\s*:\s*"(\d+)"', msg)
@@ -209,15 +227,45 @@ def download_document(session, api_key, rcept_no):
     return data
 
 
-def report_text(session, cache, api_key, rcept_no):
-    """접수번호 -> 원문 글 (일주일 저장: 같은 보고서는 다시 받지 않아 하루 호출 한도를 아낀다)."""
+def _disk_path(rcept_no):
+    return os.path.join(DISK_DIR, f"{re.sub(r'[^0-9A-Za-z]', '', str(rcept_no))}.txt.gz")
+
+
+def disk_get(rcept_no, ttl=7 * DAY):
+    p = _disk_path(rcept_no)
+    try:
+        if time.time() - os.path.getmtime(p) < ttl:
+            with gzip.open(p, "rt", encoding="utf-8") as f:
+                return f.read()
+    except OSError:
+        pass
+    return None
+
+
+def disk_put(rcept_no, text):
+    try:
+        os.makedirs(DISK_DIR, exist_ok=True)
+        tmp = _disk_path(rcept_no) + ".part"
+        with gzip.open(tmp, "wt", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, _disk_path(rcept_no))
+    except OSError:
+        pass  # 디스크에 못 써도 앱은 그대로 (메모리 저장만)
+
+
+def report_text(session, cache, api_key, rcept_no, progress=None):
+    """접수번호 -> 원문 글. 메모리·디스크에 일주일 저장 (같은 보고서는 다시 받지 않아 하루 호출 한도를 아낀다)."""
     key = ("doc", rcept_no)
     hit = cache.get(key, 7 * DAY)
     if hit is not None:
         return hit
-    text = doc_text_from_zip(download_document(session, api_key, rcept_no))
+    text = disk_get(rcept_no)
+    if text:
+        return cache.put(key, text)
+    text = doc_text_from_zip(download_document(session, api_key, rcept_no, progress=progress))
     if not text:
         raise DartApiError("원문에서 글자를 찾지 못했어요. 원문 링크로 보세요.")
+    disk_put(rcept_no, text)
     return cache.put(key, text)
 
 

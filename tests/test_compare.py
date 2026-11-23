@@ -47,7 +47,9 @@ def test_collect_and_rank():
     def fin_fetch(code, y, r):
         if code == "B":
             raise RuntimeError("재무제표 오류")
-        return ([{"sj_div": "BS", "account_id": "ifrs-full_Liabilities", "account_nm": "부채총계", "thstrm_amount": "100", "frmtrm_amount": "90"},
+        return ([{"sj_div": "CIS", "account_id": "ifrs-full_Revenue", "account_nm": "매출액", "thstrm_amount": "1,000", "frmtrm_amount": "800"},
+                 {"sj_div": "CIS", "account_id": "dart_OperatingIncomeLoss", "account_nm": "영업이익", "thstrm_amount": "100", "frmtrm_amount": "-20"},
+                 {"sj_div": "BS", "account_id": "ifrs-full_Liabilities", "account_nm": "부채총계", "thstrm_amount": "100", "frmtrm_amount": "90"},
                  {"sj_div": "BS", "account_id": "ifrs-full_Equity", "account_nm": "자본총계", "thstrm_amount": "200", "frmtrm_amount": "200"}], "CFS")
     rows = cp.collect(fake_fetch, corps, 2025, "11011", fin_fetch=fin_fetch)
     by = {r["name"]: r for r in rows}
@@ -55,6 +57,8 @@ def test_collect_and_rank():
     check(by["LG에너지솔루션"]["emp_chg"] == 25.0 and by["삼성전자"]["emp_chg"] is None, "1년 전 자료가 없으면 증감률 비움")
     check(by["SK하이닉스"]["top_pay_who"] == "홍길동 회장" and by["SK하이닉스"]["div"] == 1e12, "최고 보수·배당")
     check(by["오류회사"]["error"] and by["오류회사"].get("pay") is None, "한 회사 오류가 전체를 멈추지 않음")
+    check(by["SK하이닉스"]["rev_chg"] == 25.0 and by["SK하이닉스"]["op_margin"] == 10.0 and by["SK하이닉스"]["op_chg"] is None
+          and by["SK하이닉스"]["op_turn"] == "흑자 전환", "매출 증감률·영업이익률, 흑자 전환이면 증감률 비우고 '전환' 표시")
     check(by["SK하이닉스"]["debt_ratio"] == 50.0 and by["LG에너지솔루션"]["pay"] and "재무제표" in by["LG에너지솔루션"]["error"], "재무제표 지표, 재무제표만 실패하면 기본 지표는 남김")
     s = cp.rank_sentence(rows, "pay")
     check(s == "1인 평균 급여는 LG에너지솔루션이 1억8500만원으로 가장 많았고, SK하이닉스(1억5800만원), 삼성전자(7000만원) 순이었다.", "순위 문장 (조사 이/가, 기사체 금액)")

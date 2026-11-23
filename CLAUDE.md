@@ -27,11 +27,12 @@
 - `compare.py`: 여러 회사 비교. 기본 지표는 DART 주요정보 API(회사별 동시 조회, 한 회사 오류는 비고로), 원문 지표(R&D·가동률·해외 비중)는 선택. 업종 묶음 `INDUSTRY_GROUPS`(DART-Joongang에서 옮김)·줄임말 `ALIASES`. `rank_sentence`가 순위 문장(증감률은 나열). 화면은 app.py `render_multi`(맨 위 '여러 회사 비교').
 - `ui.py`: 화면 꾸미기 '교정지' — 종이 #F2F4F3 · 먹 #1F2B30 · 형광펜 #EEF36A(근거·새 문장) · 교정 빨강 #B8322A(없어진 문장) · 인주 청 #24479A. 원문은 괘선+줄 번호. HTML 조각은 `st.html`(스타일 포함), AI 답만 마크다운.
 - `tests/fake_app.py`: 가짜 DART·AI 응답으로 앱 띄우기 (`streamlit run tests/fake_app.py`) — 화면 확인용.
+- 화면 흐름: 보고서를 고르면 `points.build_cards(part='fast')`(원문 없이 DART 자료만)를 먼저 그리고, `load_parsed`가 원문을 받아(진행 표시, `dart_client.DOC_DEADLINE` 90초 넘으면 끊음, 메모리+디스크 `/tmp/report-analyzer-cache` 일주일) `part='doc'` 카드·공장별 가동률·다른 탭을 채운다.
 - `app.py`: 화면 — 맨 위 '회사 하나 깊게 보기'(기사 포인트 / 목차별 보기 / AI 분석 / 달라진 문장) 또는 '여러 회사 비교'.
 
 ## 단계
 1. 뼈대(완료): 목차별 원문+줄 번호, AI 분석 11개, 달라진 문장(1년 전·바로 앞).
-2. 기사 포인트 카드(완료): 출자·종속회사 → 임원·직원 → 주주환원·지분 → 가동률(plant.py, 공장별 표+기사 문장) → 원재료 매입액(II-3 표) → 시설투자(현금흐름표 유형자산 취득 + 원문 계획 줄) → 부채비율·차입금·현금(DART 재무제표 fnlttSinglAcntAll, `points.fetch_fin`) → R&D → 지역별 매출(주석 지역 공시).
+2. 기사 포인트 카드(완료): 실적(손익, 흑자·적자 전환, 경영진단 이유 줄) → 출자·종속회사 → 임원·직원 → 주주환원·지분 → 가동률(plant.py, 공장별 표+기사 문장) → 원재료 매입액(II-3 표) → 시설투자(현금흐름표 유형자산 취득 + 원문 계획 줄) → 부채비율·차입금·현금(DART 재무제표 fnlttSinglAcntAll, `points.fetch_fin`) → R&D → 지역별 매출(주석 지역 공시).
 3. 골든 시험(완료): 삼성전자·KB금융·에코프로비엠·현대차 반기·현대차 정정본.
 4. 여러 회사 비교(완료): 회사 이름·업종 묶음, 같은 기간 지표 표, 순위 문장.
 5. 네이버 검색 API 기사 수집(완료): `tools/news_collect.py` + Actions 'news_collect'(수동, 이 공개 저장소에서 실행 — 무료). 결과는 paper-private `report-news` 브랜치(naver_reports.jsonl·summary.md)에만, 로그엔 건수만. Secrets: NAVER_CLIENT_ID·NAVER_CLIENT_SECRET·PAPER_PRIVATE_TOKEN.

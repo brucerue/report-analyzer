@@ -152,6 +152,39 @@ def test_zip_and_list():
     check(dc.find_corps(corps, "005930")[0]["corp_name"] == "삼성전자", "종목코드로 찾기")
 
 
+def test_download_deadline_and_disk():
+    import tempfile, time
+    class Res:
+        def __init__(self, chunks):
+            self.chunks = chunks
+        def iter_content(self, chunk_size=None):
+            for ch in self.chunks:
+                yield ch
+        def close(self):
+            pass
+    class S:
+        def __init__(self, chunks):
+            self.chunks, self.calls = chunks, 0
+        def get(self, url, params=None, timeout=None, stream=None):
+            self.calls += 1
+            return Res(self.chunks)
+    seen = []
+    try:
+        dc.download_document(S([b"PK" + b"x" * 10, b"y" * 10]), "K", "1", progress=lambda n, t: seen.append(n), deadline=-1)
+    except dc.DartApiError as e:
+        check("초를 넘어 멈췄어요" in str(e) and seen == [12], "내려받기 시간 제한 (조각마다 진행 표시, 넘으면 끊음)")
+    else:
+        raise AssertionError("시간 제한 오류가 나야 함")
+    dc.DISK_DIR = tempfile.mkdtemp()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("1.xml", "<P>본문 글</P>")
+    s1 = S([buf.getvalue()])
+    t1 = dc.report_text(s1, dc.Cache(), "K", "20260101000001")
+    t2 = dc.report_text(s1, dc.Cache(), "K", "20260101000001")  # 새 메모리 저장소 = 앱이 다시 켜진 것
+    check(t1 == t2 == "본문 글" and s1.calls == 1, "디스크 저장: 앱이 다시 켜져도 같은 원문은 다시 받지 않음")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

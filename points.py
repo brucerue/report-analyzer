@@ -451,6 +451,78 @@ FIN_ITEMS = {  # key: (이름들, 표준 코드들, 재무제표)
                                        "ifrs-full_PurchaseOfPropertyPlantAndEquipment"], ("CF",)),
     "intangible": (["무형자산의취득", "무형자산취득"], ["ifrs-full_PurchaseOfIntangibleAssetsClassifiedAsInvestingActivities"], ("CF",)),
 }
+INCOME_ITEMS = {  # 산업 취재 도우미 REVENUE/OPERATING/NET 이름·코드를 옮김
+    "rev": (["매출액", "수익(매출액)", "영업수익", "매출", "수익", "매출액및기타수익", "매출및기타수익", "매출액(영업수익)"],
+            ["ifrs-full_Revenue", "ifrs_Revenue"]),
+    "op": (["영업이익", "영업이익(손실)", "영업손익", "영업손실", "영업손실(이익)"], ["dart_OperatingIncomeLoss"]),
+    "net": (["당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실", "당기순손실(이익)", "연결당기순이익", "분기순이익",
+             "분기순이익(손실)", "분기순손실", "반기순이익", "반기순이익(손실)", "반기순손실", "당기순이익(순손실)", "분기순이익(순손실)",
+             "반기순이익(순손실)", "분기순손익", "반기순손익", "연결분기순이익", "연결반기순이익", "연결당기순이익(손실)"],
+            ["ifrs-full_ProfitLoss", "ifrs_ProfitLoss"]),
+}
+LOSS_ONLY_NAMES = {"영업손실", "당기순손실", "분기순손실", "반기순손실"}  # 이 이름이면 양수로 적혀도 손실
+
+
+def income_pick(rows, key, col):
+    names, ids = INCOME_ITEMS[key]
+    sj = ("IS", "CIS")
+    cand = [r for r in rows if str(r.get("account_id", "")).strip() in ids and r.get("sj_div") in sj]
+    if not cand:
+        cand = [r for r in rows if _nm(r) in names and r.get("sj_div") in sj]
+    for r in cand:
+        v = to_num(r.get(col))
+        if v is not None:
+            return -v if v > 0 and _nm(r) in LOSS_ONLY_NAMES else v
+    return None
+
+
+def income_stats(rows):
+    """손익 -> {cum: {now, prev}, qtr: {now, prev}}. cum = 누적(사업보고서는 1년, 분기·반기는 그해 초부터),
+    qtr = 그 분기 3개월(분기·반기보고서만, 사업보고서는 None). 값마다 rev·op·net(원)."""
+    def get(col, alt=None):
+        d = {}
+        for k in INCOME_ITEMS:
+            v = income_pick(rows, k, alt) if alt else None
+            d[k] = v if v is not None else income_pick(rows, k, col)
+        return d
+    has_add = any(str(r.get("thstrm_add_amount") or "").strip() not in ("", "-") for r in rows if r.get("sj_div") in ("IS", "CIS"))
+    out = {"cum": {"now": get("thstrm_amount", "thstrm_add_amount"), "prev": get("frmtrm_amount", "frmtrm_add_amount")}, "qtr": None}
+    if has_add:
+        out["qtr"] = {"now": get("thstrm_amount"), "prev": get("frmtrm_amount")}
+    return out
+
+
+def pl_text(kind, v):
+    """('영업', -34e9) -> '영업손실 340억원', ('영업', 5e11) -> '영업이익 5000억원', ('순', …) -> 순이익/순손실."""
+    return f"{kind}{'손실' if v < 0 else '이익'} {won_text(abs(v))}"
+
+
+def profit_change(now, prev):
+    """이익 증감: 흑자 전환 / 적자 전환 / 적자 지속 / 적자 축소 / n% 증가·감소."""
+    if now is None or prev is None:
+        return None
+    if prev < 0 <= now:
+        return "흑자 전환"
+    if now < 0 <= prev:
+        return "적자 전환"
+    if now < 0 and prev < 0:
+        return "적자 축소" if now > prev else "적자 확대"
+    return change_text(now, prev)
+
+
+def mdna_reason_lines(parsed, limit=5):
+    """IV. 경영진단에서 실적이 왜 변했는지 회사가 쓴 문장 (원문 줄, 계산 안 함)."""
+    out = []
+    for no, t in block_lines(parsed, "mdna"):
+        if "|" in t or len(t) < 25:
+            continue
+        if re.search(r"매출|영업이익|영업손실|순이익", t) and re.search(r"증가|감소|개선|악화|하락|상승|확대|축소|전환", t):
+            out.append((no, t[:240]))
+            if len(out) >= limit:
+                break
+    return out
+
+
 BORROW_NAMES = ["단기차입금", "유동성장기부채", "유동성장기차입금", "유동성사채", "유동성전환사채", "단기사채", "차입금", "유동성차입금",
                 "장기차입금", "비유동차입금", "사채", "장기사채", "전환사채", "신주인수권부사채", "교환사채"]
 
@@ -509,6 +581,7 @@ def fin_stats(rows):
         d["debt_ratio"] = d["liab"] / d["equity"] * 100 if d["liab"] is not None and d["equity"] else None
         d["net_borrow"] = d["borrow"] - d["cash"] if d["borrow"] is not None and d["cash"] is not None else None
         out[k] = d
+    out["income"] = income_stats(rows)
     return out
 
 
@@ -602,12 +675,55 @@ def fetch_api(call, cache, api_key, api, corp_code, year, reprt):
 # ------------------------------------------------------------
 # 카드 만들기
 # ------------------------------------------------------------
-def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None):
+EMPTY = {"lines": [], "mains": {}, "blocks": {}}
+FAST_KEYS = {"income", "staff", "pay", "holder", "return", "capex", "debt"}  # 원문 없이 DART 자료만으로 나오는 카드
+
+
+def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None, part="all"):
+    """part='fast'면 원문 없이 나오는 카드만(parsed 없어도 됨), 'doc'이면 원문 카드만, 'all'이면 모두."""
+    out = _build(parsed or EMPTY, prev_parsed, api if part != "doc" else None, reprt, fin_api if part != "doc" else None)
+    if part == "fast":
+        return [c for c in out if c["key"] in FAST_KEYS]
+    if part == "doc":
+        return [c for c in out if c["key"] not in FAST_KEYS]
+    return out
+
+
+def _build(parsed, prev_parsed, api, reprt="11011", fin_api=None):
     """parsed: 이번 보고서, prev_parsed: 1년 전 같은 기간 보고서(없으면 None),
     api(name) -> (이번 응답, 1년 전 응답) 를 돌려주는 함수 (없으면 None).
     fin_api() -> fin_stats 결과 + fs('CFS'|'OFS') (없으면 None).
     -> 카드 목록 (기사 빈도순)."""
     out = []
+    fin = fin_api() if fin_api else None
+
+    # 0) 실적 (DART 재무제표 손익) — 기사 집계 1위 주제
+    if fin and fin.get("income"):
+        cum, qtr = fin["income"]["cum"], fin["income"]["qtr"]
+        n, p = cum["now"], cum["prev"]
+        if n["rev"] is not None or n["op"] is not None:
+            span = "" if reprt == "11011" else " (누적)"
+            margin = n["op"] / n["rev"] * 100 if n["op"] is not None and n["rev"] else None
+            pmargin = p["op"] / p["rev"] * 100 if p["op"] is not None and p["rev"] else None
+            rows0 = [(f"매출{span}", won_text(n["rev"]) + (f" (전년 같은 기간 {won_text(p['rev'])}, {change_text(n['rev'], p['rev'])})" if p["rev"] else ""), None),
+                     (f"순이익{span}", (pl_text("순", n["net"]) if n["net"] is not None else "-") + (f" ({profit_change(n['net'], p['net'])})" if p["net"] is not None and n["net"] is not None else ""), None)]
+            if margin is not None:
+                rows0.append(("영업이익률", f"{margin:.1f}%" + (f" (전년 같은 기간 {pmargin:.1f}%)" if pmargin is not None else ""), None))
+            if qtr and (qtr["now"]["rev"] is not None or qtr["now"]["op"] is not None):
+                q, qp = qtr["now"], qtr["prev"]
+                rows0.append(("이번 분기(3개월) 매출", won_text(q["rev"]) + (f" ({change_text(q['rev'], qp['rev'])})" if qp["rev"] else ""), None))
+                rows0.append(("이번 분기(3개월) 영업이익", (pl_text("영업", q["op"]) if q["op"] is not None else "-") + (f" ({profit_change(q['op'], qp['op'])})" if qp["op"] is not None and q["op"] is not None else ""), None))
+            rows0 = [r for r in rows0 if not (r[1] == "-" or r[1].startswith("- "))]  # 값 없음만 숨김 (마이너스 숫자는 남김)
+            out.append(card("income", f"실적{span}", value=pl_text("영업", n["op"]) if n["op"] is not None else None,
+                            prev=f"전년 같은 기간 {pl_text('영업', p['op'])}" if p["op"] is not None else None,
+                            change=profit_change(n["op"], p["op"]), rows=rows0,
+                            note="DART 재무제표 손익계산서 값이에요. 실적 변동 이유는 아래 '회사 설명' 카드(경영진단 원문 줄)를 보세요.",
+                            source=f"DART 재무제표({fin.get('fs', '')}) · 손익계산서"))
+    reasons = mdna_reason_lines(parsed)
+    if reasons:
+        out.append(card("reason", "실적 변동 이유 (회사 설명, 원문 줄)", rows=[("", t, no) for no, t in reasons],
+                        note="회사가 경영진단(IV)에 쓴 문장이에요. 회사의 주장이니 '회사는 ~라고 설명'으로 쓰세요.",
+                        source=rp.REPORT_BLOCK_LABELS["mdna"]))
 
     # 1) 출자 변동
     rows, money, shares = invest_changes(parsed)
@@ -740,26 +856,30 @@ def build_cards(parsed, prev_parsed, api, reprt="11011", fin_api=None):
                         rows=rows_m, lines=[mat["line_total"]] if mat["line_total"] else [],
                         note=("합계 줄이 없어 부문 소계를 더했어요. " if not mat["line_total"] else "") + "비중은 표에 적힌 값이에요(부문 안 비중일 수 있어요).", source=rp.REPORT_BLOCK_LABELS["biz_plant"] + " · 주요 원재료 표"))
 
-    # 7-3) 시설투자: 현금흐름표 '유형자산의 취득'(DART 재무제표) + 원문 투자 계획 줄
-    fin = fin_api() if fin_api else None
+    # 7-3) 시설투자: 현금흐름표 '유형자산의 취득'(DART 재무제표) — 원문 투자 계획 줄은 따로 'plan' 카드(원문 카드)
+    plan = invest_plan_lines(parsed)
+    if plan:
+        out.append(card("plan", "투자 계획·실적 (원문 줄)", rows=[("", t, no) for no, t in plan],
+                        note="원문의 투자 계획·실적 표를 그대로 보여 줘요(계산 안 함). 단위는 표 위 '단위' 줄을 확인하세요.",
+                        source=rp.REPORT_BLOCK_LABELS["biz_plant"]))
     if fin:
         f1, f0 = fin["now"], fin["prev"]
-        plan = invest_plan_lines(parsed)
-        if f1["capex"] is not None or plan:
-            rows7 = [("", t, no) for no, t in plan]
+        plan = []
+        if f1["capex"] is not None:
+            rows7 = []
             if f1["intangible"]:
                 rows7.insert(0, ("무형자산 취득", won_text(f1["intangible"]) + (f" (전기 같은 기간 {won_text(f0['intangible'])})" if f0["intangible"] else ""), None))
             out.append(card("capex", "시설투자 (유형자산의 취득)", value=won_text(f1["capex"]) if f1["capex"] is not None else None,
                             prev=f"전기 같은 기간 {won_text(f0['capex'])}" if f0["capex"] else None, change=change_text(f1["capex"], f0["capex"]),
-                            rows=rows7, note=("현금흐름표 금액이에요" + ("" if reprt == "11011" else " (그해 초부터 누적)") + "."
-                                  + (" 아래 줄은 원문의 투자 계획·실적 표(계산 안 함)." if plan else "")),
-                            source=f"DART 재무제표({fin['fs']}) · 현금흐름표 + " + rp.REPORT_BLOCK_LABELS["biz_plant"]))
+                            rows=rows7, note=("현금흐름표 금액이에요" + ("" if reprt == "11011" else " (그해 초부터 누적)") + "."),
+                            source=f"DART 재무제표({fin['fs']}) · 현금흐름표"))
         # 부채·차입·현금 (은행·보험·지주 같은 금융업은 예금·보험부채 때문에 부채비율이 의미 없어 뺀다)
-        financial = "biz_fin_ops" in parsed["blocks"] and "biz_plant" not in parsed["blocks"]
+        financial = ("biz_fin_ops" in parsed["blocks"] and "biz_plant" not in parsed["blocks"]) or (
+            f1["cash"] is None and f1["debt_ratio"] is not None and f1["debt_ratio"] > 500)  # 원문 없이도: 은행·지주는 현금 계정 없이 부채비율이 매우 높다
         if f1["liab"] is not None and f1["equity"] and not financial:
             rows_d = [("부채총계", won_text(f1["liab"]), None), ("차입금(사채 포함)", won_text(f1["borrow"]) + (f" (전기말 {won_text(f0['borrow'])})" if f0["borrow"] else ""), None),
                       ("현금및현금성자산", won_text(f1["cash"]) + (f" (전기말 {won_text(f0['cash'])})" if f0["cash"] else ""), None)]
-            rows_d = [r for r in rows_d if not r[1].startswith("-")]
+            rows_d = [r for r in rows_d if not (r[1] == "-" or r[1].startswith("- "))]
             if f1["net_borrow"] is not None:
                 rows_d.append(("순차입금(차입금-현금)", won_text(f1["net_borrow"]) if f1["net_borrow"] >= 0 else "순현금 " + won_text(-f1["net_borrow"]), None))
             out.append(card("debt", "부채비율·차입금·현금", value=f"부채비율 {f1['debt_ratio']:.1f}%",
