@@ -14,6 +14,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import dart_client as dc
+import points as pt
 import report_parse as rp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,25 @@ def pick(rows, kind, period):
         if dc.report_kind_of(r.get("report_nm")) == kind and (period is None or dc.report_period_of(r.get("report_nm")) == period):
             return r
     return None
+
+
+def show_cards(parsed, corp_code, row, session, cache, key):
+    year, reprt = pt.reprt_of(row)
+    memo = {}
+
+    def api(name):
+        if name not in memo:
+            call = lambda url, params: dc.call_dart(session, url, params)
+            memo[name] = (pt.fetch_api(call, cache, key, name, corp_code, year, reprt),
+                          pt.fetch_api(call, cache, key, name, corp_code, year - 1, reprt))
+        return memo[name]
+
+    print("--- 기사 포인트 카드 ---")
+    for c in pt.build_cards(parsed, None, api if year and corp_code else None, reprt or "11011"):
+        head = f"  [{c['title']}] {c['value'] or ''} | 비교 {c['prev'] or '-'} | {c['change'] or '-'}"
+        print(head if not c.get("empty") else f"  [{c['title']}] (없음) {c['empty']}")
+        for label, text, line in c["rows"][:6]:
+            print(f"      {label} : {text[:120]} (줄 {line})")
 
 
 def summarize(parsed):
@@ -79,7 +99,23 @@ def main():
     corps = dc.load_corp_list(session)
     results, problems = {}, []
 
+    fixed = json.load(open(EXPECTED, encoding="utf-8")) if os.path.exists(EXPECTED) and "--write" not in sys.argv else {}
+
     def run(name, corp_name, kind, period, need_correction=False):
+        if name in fixed:  # 기대값이 있으면 그때 확인한 바로 그 보고서(접수번호)로 다시 본다
+            e = fixed[name]
+            row = {"rcept_no": e["rcept_no"], "report_nm": e.get("report", ""), "corp_name": e["corp"]}
+            try:
+                parsed = rp.parse_report(dc.report_text(session, cache, key, e["rcept_no"]))
+            except (dc.DartApiError, rp.ParseError) as err:
+                problems.append(f"{name}: {err}")
+                return None
+            s = summarize(parsed)
+            show(name, row, parsed, s)
+            c = dc.find_corps(corps, e["corp"], limit=1)
+            show_cards(parsed, c[0]["corp_code"] if c else None, row, session, cache, key)
+            results[name] = {"corp": e["corp"], "report": e.get("report", ""), "rcept_no": e["rcept_no"], **s}
+            return row
         c = dc.find_corps(corps, corp_name, limit=1)
         if not c:
             problems.append(f"{name}: 회사 '{corp_name}' 못 찾음")
@@ -105,7 +141,7 @@ def main():
     for name, corp, kind, period in CASES:
         if not run(name, corp, kind, period):
             problems.append(f"{name}: {corp} {kind} 없음")
-    for corp in CORRECTION_POOL:
+    for corp in ([None] if "정정본" in fixed else CORRECTION_POOL):
         if run("정정본", corp, None, None, need_correction=True):
             break
     else:
@@ -117,7 +153,7 @@ def main():
     for p in problems:
         print("문제:", p)
 
-    exp = {n: {"corp": r["corp"], "rcept_no": r["rcept_no"], "mains": sorted(r["mains"]), "blocks": sorted(r["blocks"])} for n, r in results.items()}
+    exp = {n: {"corp": r["corp"], "report": r["report"], "rcept_no": r["rcept_no"], "mains": sorted(r["mains"]), "blocks": sorted(r["blocks"])} for n, r in results.items()}
     print("\n기대값 후보(JSON):")
     print(json.dumps(exp, ensure_ascii=False))
     if "--write" in sys.argv:

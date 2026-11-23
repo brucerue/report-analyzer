@@ -13,4 +13,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python tests/test_core.py
+      - run: python tests/test_points.py
       - run: python tests/test_app.py

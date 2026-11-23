@@ -10,6 +10,8 @@ os.environ.setdefault("DART_API_KEY", "TEST")
 os.environ.setdefault("GEMINI_API_KEY", "TEST")
 import analyses as an
 import dart_client as dc
+import points as pt
+pt.fetch_api = lambda *a, **k: None  # 가짜: DART 구조화 자료 없음
 from test_core import fake_report
 
 ROWS = [{"rcept_no": "20260401000002", "rcept_dt": "20260401", "report_nm": "[기재정정]사업보고서 (2025.12)"},

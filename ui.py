@@ -61,6 +61,21 @@ html, body, [data-testid="stAppViewContainer"], .stApp{ background:var(--paper);
 .ra-parts span{ color:var(--ink-soft); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .ra-parts .none{ color:#9AA6AA; }
 
+/* 기사 포인트 카드 */
+.ra-cards{ display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:1rem; margin:.6rem 0 1rem; }
+.ra-card{ background:var(--sheet); border:1px solid var(--rule); border-top:3px solid var(--ink); padding:1rem 1.15rem .9rem; }
+.ra-card h3{ font-family:"IBM Plex Sans KR", sans-serif; font-size:.95rem; font-weight:600; margin:0 0 .5rem; padding:0; color:var(--ink); }
+.ra-card .val{ font-size:1.75rem; font-weight:600; line-height:1.2; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.ra-card .cmp{ font-size:.88rem; color:var(--ink-soft); margin:.25rem 0 .6rem; }
+.ra-card .cmp b{ color:var(--ink); font-weight:600; }
+.ra-card table{ width:100%; border-collapse:collapse; font-size:.88rem; margin:.3rem 0 .4rem; }
+.ra-card td{ border-top:1px solid #E6EBE9; padding:.35rem 0; vertical-align:top; }
+.ra-card td.l{ color:var(--ink-soft); padding-right:.8rem; width:38%; }
+.ra-card td.ln{ text-align:right; white-space:nowrap; padding-left:.6rem; color:#8A979C; font-size:.78rem; font-variant-numeric:tabular-nums; }
+.ra-card td.raw{ font-family:"Nanum Gothic Coding", monospace; font-size:.8rem; word-break:break-all; }
+.ra-card .foot{ font-size:.78rem; color:var(--ink-soft); margin:.4rem 0 0; }
+.ra-card .empty{ color:var(--ink-soft); font-size:.9rem; margin:0; }
+
 /* AI 답의 근거 표시 */
 .ra-cite{ font-size:.78rem; color:var(--seal); border:1px solid #B9C6E4; background:#F1F4FB; padding:.05rem .4rem;
   white-space:nowrap; border-radius:2px; }
@@ -152,8 +167,7 @@ def parts_list(found, missing):
     cells = "".join(f"<div>{esc(name)}<span>줄 {n:,}</span></div>" for name, n in found)
     st.html(f'<div class="ra-parts">{cells}</div>')
     if missing:
-        with st.expander(f"못 찾은 부분 {len(missing)}개"):
-            note(", ".join(missing))
+        note(f"못 찾은 부분 {len(missing)}개: " + ", ".join(missing))
 
 
 CITE_RE = re.compile(r"\[([^\[\]\n]{2,60}?(?:줄\s*\d+[^\[\]\n]*)?)\]")
@@ -178,3 +192,37 @@ def legend(marker_text=None, red_text=None):
     if red_text:
         bits.append(f'<span class="r">줄긋기</span> {esc(red_text)}')
     st.html(f'<p class="ra-legend">{"&nbsp;&nbsp;&nbsp;".join(bits)}</p>')
+
+
+def cards(items):
+    """기사 포인트 카드들 (points.build_cards 결과)."""
+    html_cards = []
+    for c in items:
+        body = [f"<h3>{esc(c['title'])}</h3>"]
+        if c.get("empty"):
+            body.append(f'<p class="empty">{esc(c["empty"])}</p>')
+        else:
+            if c.get("value"):
+                body.append(f'<div class="val">{esc(c["value"])}</div>')
+            cmp = []
+            if c.get("prev"):
+                cmp.append(f"비교 {esc(c['prev'])}")
+            if c.get("change"):
+                cmp.append(f"<b>{esc(c['change'])}</b>")
+            if cmp:
+                body.append(f'<p class="cmp">{", ".join(cmp)}</p>')
+            if c.get("rows"):
+                trs = []
+                for label, text, line in c["rows"]:
+                    ln = f"줄 {line:,}" if line else ""
+                    if label:
+                        trs.append(f'<tr><td class="l">{esc(label)}</td><td>{esc(text)}</td><td class="ln">{ln}</td></tr>')
+                    else:
+                        trs.append(f'<tr><td class="raw" colspan="2">{esc(text)}</td><td class="ln">{ln}</td></tr>')
+                body.append(f"<table>{''.join(trs)}</table>")
+            foot = [c.get("note") or "", ("출처: " + c["source"]) if c.get("source") else ""]
+            foot = [f for f in foot if f]
+            if foot:
+                body.append(f'<p class="foot">{"<br>".join(esc(f) for f in foot)}</p>')
+        html_cards.append(f'<article class="ra-card">{"".join(body)}</article>')
+    st.html(f'<div class="ra-cards">{"".join(html_cards)}</div>')

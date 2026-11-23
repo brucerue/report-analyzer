@@ -9,10 +9,11 @@ import streamlit as st
 
 import analyses as an
 import dart_client as dc
+import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.23 15:31"
+LAST_UPDATED = "2026.11.23 15:38"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -122,11 +123,43 @@ tab_point, tab_toc, tab_ai, tab_diff, tab_multi = st.tabs(["기사 포인트", "
 
 # ---------------- 기사 포인트 (2단계에서 숫자 카드로) ----------------
 with tab_point:
-    st.info("직전 대비 숫자 변화를 모은 기사 포인트 카드는 다음 단계에서 이 자리에 들어와요. 지금은 이 보고서에서 찾은 부분과 시작 줄을 보여 줘요.")
+    year, reprt = pt.reprt_of(row)
+    prev_row = dc.find_prev_periodic(rows, row)
+    prev_parsed = None
+    if prev_row:
+        try:
+            with st.spinner("1년 전 같은 기간 보고서도 받아 비교하는 중..."):
+                prev_parsed = get_parsed(str(prev_row["rcept_no"]).strip())
+        except (dc.DartApiError, rp.ParseError):
+            prev_parsed = None
+    memo = {}
+
+    def api(name):
+        if name not in memo:
+            call = lambda url, params: dc.call_dart(get_session(), url, params)
+            try:
+                memo[name] = (pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year, reprt),
+                              pt.fetch_api(call, get_cache(), DART_KEY, name, corp["corp_code"], year - 1, reprt))
+            except dc.DartApiError:
+                memo[name] = (None, None)
+        return memo[name]
+
+    with st.spinner("기사 포인트 숫자를 모으는 중..."):
+        items = pt.build_cards(parsed, prev_parsed, api if year else None, reprt or "11011")
+    ui.note(f"직전 비교: {date_label(prev_row) if prev_row else '1년 전 같은 기간 보고서 없음'}. 숫자는 DART 구조화 자료와 원문 표에서만 가져와요 (AI 없음).")
+    if items:
+        ui.cards(items)
+        cite = sorted({ln for c in items for ln in ([r[2] for r in c["rows"]] + c["lines"]) if ln})
+        if cite:
+            with st.expander(f"카드 근거 줄 원문 보기 ({len(cite)}곳)"):
+                ui.legend(marker_text="카드가 가리킨 줄")
+                ui.sheet(ui.around_rows(parsed["lines"], set(cite[:40]), width=2))
+    else:
+        st.info("이 보고서에서 카드로 만들 숫자를 찾지 못했어요. '목차별 보기'에서 원문을 확인해 주세요.")
     found = [(rp.REPORT_BLOCK_LABELS[k], rp.block_first_line(parsed, k)) for k in rp.REPORT_BLOCK_LABELS if k in parsed["blocks"]]
     missing = [rp.REPORT_BLOCK_LABELS[k] for k in rp.REPORT_BLOCK_LABELS if k not in parsed["blocks"]]
-    ui.note(f"이 보고서에서 찾은 부분 {len(found)}개와 시작 줄 (원문 전체 {len(parsed['lines']):,}줄)")
-    ui.parts_list(found, missing)
+    with st.expander(f"이 보고서에서 찾은 부분 {len(found)}개 (원문 전체 {len(parsed['lines']):,}줄)"):
+        ui.parts_list(found, missing)
 
 # ---------------- 목차별 보기 ----------------
 with tab_toc:
