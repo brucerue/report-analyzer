@@ -185,6 +185,13 @@ def test_download_deadline_and_disk():
     check(t1 == t2 == "본문 글" and s1.calls == 1, "디스크 저장: 앱이 다시 켜져도 같은 원문은 다시 받지 않음")
 
 
+
+def test_quota_message():
+    import analyses as an
+    assert "하루 한도" in an.quota_message('{"error":{"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}')
+    assert "분당 한도" in an.quota_message('{"error":{"details":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]}}')
+    print("ok - 무료 한도 안내 (하루/분당 구분)")
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 00:50"
+LAST_UPDATED = "2026.11.24 01:10"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -478,15 +478,21 @@ def render_frame(all_cards, picked, lead, rno):
         st.json(data, expanded=False)
     if st.button("틀 만들기", type="primary", key="f_go"):
         with st.spinner("쓰는 중... (작성 → 규칙 점검, 1분 안팎)"):
+            src = art.pct0(json.dumps(data, ensure_ascii=False)) + "\n" + json.dumps(data, ensure_ascii=False)
             try:
                 system, prompt = art.write_prompt(style["rules"], sty.examples_for(style, kind), kind, data)
                 first = an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
-                system2, prompt2 = art.check_prompt(style["rules"], first)
-                body, fixes = art.split_check(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt2, system2, GEMINI_FALLBACK))
-                st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes,
-                                                 src=art.pct0(json.dumps(data, ensure_ascii=False)) + "\n" + json.dumps(data, ensure_ascii=False))
             except an.AiError as e:
+                first = None
                 st.error(str(e))
+            if first:
+                try:
+                    system2, prompt2 = art.check_prompt(style["rules"], first)
+                    body, fixes = art.split_check(an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt2, system2, GEMINI_FALLBACK))
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src)
+                except an.AiError as e:  # 점검에서 한도에 걸려도 첫 초안은 살린다
+                    st.warning(f"규칙 점검은 못 했어요 — {e} 아래는 점검 전 첫 초안이에요.")
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True)
     out = st.session_state.get("f_out")
     if out and out["rno"] == rno:
         n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
@@ -498,6 +504,8 @@ def render_frame(all_cards, picked, lead, rno):
             ui.note("틀의 숫자는 모두 숫자 자료에 있어요.")
         st.html(marked(out["body"]))
         st.code(out["body"], language=None, wrap_lines=True)
+        if out.get("unchecked"):
+            ui.note("규칙 점검 전 초안이에요. 한도가 풀리면 '틀 만들기'를 다시 누르면 점검까지 해요.")
         with st.expander(f"규칙 점검에서 고친 곳 ({len(out['fixes'])})"):
             st.markdown("\n".join(f"- {x}" for x in out["fixes"]) or "고친 곳 없음")
         with st.expander("점검 전 첫 초안"):

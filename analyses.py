@@ -200,6 +200,14 @@ def cited_lines(answer):
 # ------------------------------------------------------------
 # Gemini (무료 등급). 유료 Claude 대체는 쓰지 않는다 (추가 비용 금지).
 # ------------------------------------------------------------
+def quota_message(body):
+    """429 응답 -> 하루 한도인지 분당 한도인지 구분한 안내."""
+    t = str(body or "")
+    if re.search(r"PerDay|per day|daily", t, re.I):
+        return "AI 무료 사용량의 하루 한도를 다 썼어요(기본 모델·예비 모델 모두). 한국시간 오후 4~5시쯤(구글 기준 자정) 다시 채워져요."
+    return "AI 무료 사용량의 분당 한도를 넘었어요(기본 모델·예비 모델 모두). 1분쯤 뒤에 다시 눌러 주세요."
+
+
 def call_gemini(session, api_key, model, prompt, system, fallback=None):
     body = {"systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -217,12 +225,12 @@ def call_gemini(session, api_key, model, prompt, system, fallback=None):
                 break
             if attempt < 2:
                 time.sleep(2 * (attempt + 1))
-        if res is not None and res.status_code not in (500, 502, 503, 504):
-            break
+        if res is not None and res.status_code not in (429, 500, 502, 503, 504):
+            break  # 429(무료 한도)면 예비 모델로 넘어간다 (모델마다 한도가 따로)
     if res is None or res.status_code in (500, 502, 503, 504):
         raise AiError("AI 서버가 지금 붐비거나 응답이 없어요. 1~2분 뒤 다시 눌러 주세요.")
     if res.status_code == 429:
-        raise AiError("AI 무료 사용량 한도를 넘었어요. 잠시 후 다시 시도해 주세요.", quota=True)
+        raise AiError(quota_message(res.text), quota=True)
     if res.status_code in (401, 403):
         raise AiError("AI 키(Streamlit Secrets의 GEMINI_API_KEY)를 확인해 주세요.")
     if res.status_code == 404:

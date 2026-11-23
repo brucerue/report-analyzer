@@ -135,3 +135,22 @@ html = " ".join(str(h.proto) for h in at.get("html"))
 assert "<mark" in html and "OO일" in html, "【확인 필요】·OO일 형광펜"
 assert not at.warning or all("숫자 자료에 없는" not in w.value for w in at.warning), "숫자 대조 통과"
 print("ok - 문체 틀: 작성 -> 규칙 점검, 고친 곳 따로, 자리 표시 형광펜")
+
+
+# ---- 점검에서 한도에 걸리면 첫 초안을 살린다 ----
+calls.clear()
+
+
+def quota_on_check(session, key, model, prompt, system, fallback=None):
+    calls.append(1)
+    if len(calls) == 1:
+        return "제목: 가나전지 실적\n\n첫 초안 본문 9조원."
+    raise an.AiError("AI 무료 사용량의 분당 한도를 넘었어요(기본 모델·예비 모델 모두). 1분쯤 뒤에 다시 눌러 주세요.", quota=True)
+
+
+an.call_gemini = quota_on_check
+at.button(key="f_go").click().run()
+assert not at.exception, at.exception
+assert any("규칙 점검은 못 했어요" in w.value for w in at.warning) and "첫 초안 본문" in " ".join(c.value for c in at.code), "점검 실패해도 첫 초안"
+print("ok - 점검에서 한도에 걸려도 첫 초안은 보임")
+
