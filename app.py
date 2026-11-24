@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 03:20"
+LAST_UPDATED = "2026.11.24 03:50"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -526,14 +526,18 @@ def render_frame(all_cards, picked, lead, rno):
                 try:
                     system2, prompt2 = art.check_prompt(style["rules"], first)
                     body, fixes = art.split_check(ask(prompt2, system2))
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src)
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src, data=data)
                 except an.AiError as e:  # 점검에서 한도에 걸려도 첫 초안은 살린다
                     st.warning(f"규칙 점검은 못 했어요 — {e} 아래는 점검 전 첫 초안이에요.")
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True)
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True, data=data)
     out = st.session_state.get("f_out")
     if out and out["rno"] == rno:
         n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
-        ui.note(f"본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
+        ui.note(f"본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표보다 100자 넘게 길어요." if n - goal > 100 else
+                                                        (" — 사실이 모자라 짧아요(억지로 채우지 않음)." if goal - n > 100 else "")))
+        fake_q = art.unverified_quotes(out["body"], out.get("data") or {})
+        if fake_q:
+            st.warning("숫자 자료에 없는 인용(큰따옴표)이 있어요 — 지어낸 말일 수 있어요: " + " / ".join(f"“{q}”" for q in fake_q) + ". 빼거나 실제 발언으로 바꿔 주세요.")
         bad = an.unverified_numbers(out["body"], out["src"])
         if bad:
             st.warning("숫자 자료에 없는 숫자가 있어요: " + ", ".join(bad) + ". 고치거나 빼 주세요.")

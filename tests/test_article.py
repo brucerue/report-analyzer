@@ -92,6 +92,15 @@ def test_frame():
         assert "PAPER_PRIVATE_READ_TOKEN" in str(e)
     print("ok - 문체 틀 재료·프롬프트·점검 답·표기")
 
+
+def test_quotes():
+    d = {"항목": [{"항목": "실적 변동 이유", "회사 설명": [{"이름": "", "값": "ESS 판매가 늘어 실적이 개선됐습니다."}]}]}
+    t = '삼성SDI는 “영업이익이 흑자 전환했다”고 밝혔다. 회사는 "ESS 판매가 늘어 실적이 개선됐습니다"라고 설명했다. ‘ESS 실적화’'
+    assert art.unverified_quotes(t, d) == ["영업이익이 흑자 전환했다"], art.unverified_quotes(t, d)
+    _, p = art.write_prompt("R", [], "B", d)
+    assert "짧아도 된다" in p and "글자 그대로" in p and "'원인 등'" in p and "단락 순서" in p
+    print("ok - 지어낸 인용 찾기, 지시(분량·인용·자리 표시·순서)")
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
