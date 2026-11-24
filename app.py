@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 03:00"
+LAST_UPDATED = "2026.11.24 03:20"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -457,6 +457,31 @@ def marked(text):
     return "<div style='white-space:pre-wrap;line-height:1.75;font-size:15px'>" + t + "</div>"
 
 
+def copy_button(text, label):
+    """클립보드 복사 단추 (st.html + 자바스크립트). 브라우저가 막으면 아래 글 오른쪽 위 단추로 복사하라고 안내."""
+    import html as _h
+    import hashlib
+    uid = "cp" + hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
+    st.html(
+        f"""<textarea id="{uid}t" style="position:absolute;left:-9999px" readonly>{_h.escape(text)}</textarea>
+<button id="{uid}b" style="font:600 14px sans-serif;padding:8px 16px;border:0;border-radius:6px;background:#24479A;color:#fff;cursor:pointer">{_h.escape(label)}</button>
+<span id="{uid}m" style="font:13px sans-serif;color:#555;margin-left:10px"></span>
+<script>
+(function() {{
+  const b = document.getElementById('{uid}b');
+  if (!b) return;
+  b.onclick = async () => {{
+    const t = document.getElementById('{uid}t'), m = document.getElementById('{uid}m');
+    let ok = false;
+    try {{ await navigator.clipboard.writeText(t.value); ok = true; }} catch (e) {{
+      try {{ t.select(); ok = document.execCommand('copy'); }} catch (e2) {{}}
+    }}
+    m.textContent = ok ? '복사했어요. claude.ai 대화창에 붙여 넣으세요.' : '브라우저가 막았어요. 아래 글 오른쪽 위 단추로 복사하세요.';
+  }};
+}})();
+</script>""", unsafe_allow_javascript=True)
+
+
 def render_frame(all_cards, picked, lead, rno):
     """문체 틀: 문체 규칙(paper-private) + 예문 + 고른 요소의 숫자 -> Gemini 작성 -> 규칙 점검.
     Gemini 대신 claude.ai 등에 직접 붙여 넣을 수 있게 같은 재료를 한 덩어리로도 보여 준다(API 비용 없음)."""
@@ -473,9 +498,11 @@ def render_frame(all_cards, picked, lead, rno):
     how = st.radio("② 만드는 방법", ["앱에서 바로 만들기 (Gemini 무료)", "Claude에 붙여 넣을 재료만 받기"], horizontal=True, key="f_how")
     data = art.facts(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
     if how.startswith("Claude"):
-        ui.note("아래 글을 오른쪽 위 단추로 복사해 claude.ai 대화창에 그대로 붙여 넣으세요. 문체 규칙·예문·숫자 자료·지시가 다 들어 있어서 "
+        ui.note("'재료 전체 복사'를 누르고 claude.ai 대화창에 그대로 붙여 넣으세요. 문체 규칙·예문·숫자 자료·지시가 다 들어 있어서 "
                 "Claude가 틀을 쓰고 스스로 규칙 점검까지 해요. (이 앱은 AI를 부르지 않아요)")
-        st.code(art.paste_bundle(style["rules"], sty.examples_for(style, kind), kind, data), language=None, wrap_lines=True)
+        bundle = art.paste_bundle(style["rules"], sty.examples_for(style, kind), kind, data)
+        copy_button(bundle, "재료 전체 복사")
+        st.code(bundle, language=None, wrap_lines=True)
         return
     ui.note("'틀 만들기'를 누르면 Gemini를 두 번(작성 → 규칙 점검) 불러요. 1분 안팎 걸리고, 결과 숫자를 고른 요소의 값과 대조해요.")
     with st.expander("참고: AI에 넘기는 숫자 자료"):
