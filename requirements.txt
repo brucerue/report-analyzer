@@ -1,3 +1,2 @@
 streamlit
 requests
-anthropic>=2.12,<3

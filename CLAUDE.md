@@ -4,9 +4,9 @@
 산업 취재 도우미(공개 저장소 `brucerue/DART-Joongang`)에서 갈라져 나왔다. 사용자는 한국어, 짧고 친절한 설명과 단계별 안내를 좋아함.
 
 ## 반드시 지킬 것
-- 이 저장소는 **공개**. API 키·토큰을 파일에 쓰지 않는다. 비밀값은 Streamlit Secrets(`DART_API_KEY`, `GEMINI_API_KEY`, `PAPER_PRIVATE_READ_TOKEN`, 선택 `ANTHROPIC_API_KEY`)에만. 채팅에 붙여 넣으라고 하지 않는다.
+- 이 저장소는 **공개**. API 키·토큰을 파일에 쓰지 않는다. 비밀값은 Streamlit Secrets(`DART_API_KEY`, `GEMINI_API_KEY`, `PAPER_PRIVATE_READ_TOKEN`)에만. 채팅에 붙여 넣으라고 하지 않는다.
 - **기사 원문(제목·리드·링크)과 특정 회사 분석 결과·보관함은 이 저장소에 넣지 않는다.** 비공개 저장소 `brucerue/paper-private`(`report-analyzer-handoff/`)에 둔다. 여기엔 낱말·건수로 된 우선순위 표만.
-- 추가 비용이 드는 서비스는 쓰지 않는다. AI는 Gemini 무료 등급이 기본. 예외: '기사 쓰기 > 문체 틀'만 Claude API(유료)를 고를 수 있다(2026.11.24 사용자 요청, Secrets `ANTHROPIC_API_KEY`가 있을 때만 선택지가 보임, `claude_ai.py`). 다른 곳에 Claude를 넓히지 않는다.
+- 추가 비용이 드는 서비스는 쓰지 않는다. AI는 Gemini 무료 등급만. Claude API는 2026.11.24 붙였다가 비용 때문에 뺐다 — 대신 문체 틀에 'Claude에 붙여 넣을 재료'(`article.paste_bundle`)를 보여 주고, 사용자가 claude.ai 구독에서 직접 돌린다.
 - 요청하지 않은 변경은 하지 않는다.
 - 기능을 바꾸면 `app.py`의 `LAST_UPDATED`(한국시간)를 올리고, 같은 커밋에서 `업데이트_기록.md` 맨 위에 `시각 [추가/수정/삭제] 내용 · 바뀐 파일 · ▶할 일`을 적는다.
 - 바꾼 뒤엔 `python tests/test_core.py`, `python tests/test_app.py`(가짜 DART 응답). 화면을 바꿨으면 `tests/fake_app.py`를 띄워 캡처로 확인. 실서버 접속이 안 되는 환경이면 솔직히 말한다.
@@ -27,7 +27,7 @@
 - `plant.py`: 공장별 가동률. II-3에서 '능력 | 실적 | 가동률%'로 끝나는 표 줄을 읽음(첫 줄의 글 칸 수로 사업부문을 이어 붙임), 단위가 '대, 시간'이면 사업부문 이름으로 고름. 공장별은 보고서 값, 합산은 능력·실적 합. 1년 전 같은 기간 보고서와 같은 공장끼리 비교, `sentences`가 숫자로만 기사 문장을 만든다.
 - `compare.py`: 여러 회사 비교. 기본 지표는 DART 주요정보 API(회사별 동시 조회, 한 회사 오류는 비고로), 원문 지표(R&D·가동률·해외 비중)는 선택. 업종 묶음 `INDUSTRY_GROUPS`(DART-Joongang에서 옮김)·줄임말 `ALIASES`. `rank_sentence`가 순위 문장(증감률은 나열). 화면은 app.py `render_multi`(맨 위 '여러 회사 비교').
 - `writer.py`: 카드 숫자 → 기사 문장 (모든 카드 같은 규칙: 증가·감소/상승·하락/흑자·적자 전환, 기간 '2025년…전년' / '2026년 1∼9월…지난해 같은 기간', 조사 plant.josa). 회사 설명은 인용 한 문장, 표 줄 카드는 문장 없음. 카드에는 문장을 보여 주지 않고 '기사 쓰기' 재료로만 쓴다.
-- `article.py`: '기사 쓰기' 탭 — ① 재료 초안(AI 없음): 고른 요소를 리드부터 엮은 숫자 문장. ② 문체 틀: `facts`(카드→JSON, 기사 문장 없음) → Gemini 작성(`write_prompt`: 문체 규칙 전문 + 유형 B·C 예문 + `APP_RULES`) → 규칙 점검(`check_prompt`, `split_check`로 고친 곳 분리) + 숫자 대조. 틀이라 날짜 'OO일', 멘트 없음, 원인·전망은 【확인 필요】.
+- `article.py`: '기사 쓰기' 탭 — ① 재료 초안(AI 없음): 고른 요소를 리드부터 엮은 숫자 문장. ② 문체 틀: `facts`(카드→JSON, 기사 문장 없음) → Gemini 작성(`write_prompt`: 문체 규칙 전문 + 유형 B·C 예문 + `APP_RULES`) → 규칙 점검(`check_prompt`, `split_check`로 고친 곳 분리) + 숫자 대조. 같은 재료를 claude.ai용 한 덩어리로도(`paste_bundle`). 틀이라 날짜 'OO일', 멘트 없음, 원인·전망은 【확인 필요】.
 - `style.py`: 문체 규칙·예문을 paper-private `report-analyzer-handoff/style/`에서 GitHub API로 읽음(Secrets `PAPER_PRIVATE_READ_TOKEN`, main → 작업 브랜치 순, 10분 저장, 시험은 `STYLE_DIR`=tests/fake_style). **지면 기사 본문이라 이 공개 저장소에 문체 파일을 넣지 않는다.** 데스크 수정 쌍은 쓰지 않는다(Gemini 무료로 보내므로).
 - 카드 기간 이름은 `points.period_labels`(이번·작년 같은 기간·누적 제목·이번 분기 3개월·prev_end '2025년 말'·same_point '2025년 9월 말'·prevq). 비교 기준: 기간 값=전년 동기(R&D도 1년 전 같은 기간 보고서), 잔액=지난해 말, 직원·소액주주·종속회사=1년 전 같은 시점, 분기 실적은 직전 분기(`points.prev_quarter`)도.
 - `ui.py`: 화면 꾸미기 '교정지' — 종이 #F2F4F3 · 먹 #1F2B30 · 형광펜 #EEF36A(근거·새 문장) · 교정 빨강 #B8322A(없어진 문장) · 인주 청 #24479A. 원문은 괘선+줄 번호. HTML 조각은 `st.html`(스타일 포함), AI 답만 마크다운.

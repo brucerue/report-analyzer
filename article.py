@@ -186,3 +186,12 @@ def body_chars(text):
     """제목 줄을 뺀 본문 글자 수 (공백 포함)."""
     lines = [x for x in str(text or "").splitlines() if not x.startswith("제목:")]
     return len("\n".join(lines).strip())
+
+
+def paste_bundle(style_rules, examples, kind, data):
+    """claude.ai 등 대화창에 그대로 붙여 넣을 재료 한 덩어리 (API 없이). 작성 지시 + 스스로 규칙 점검까지."""
+    system, prompt = write_prompt(style_rules, examples, kind, data)
+    return ("아래 [문체 규칙]을 지켜 기사 '틀'을 써 줘. 다 쓴 뒤 규칙에 어긋난 문장이 없는지 스스로 점검해 고치고, "
+            "맨 끝에 '[고친 곳]' 목록(- 전 → 후)을 붙여 줘. 숫자·사실은 [분석 결과]에 있는 것만 써.\n\n"
+            f"[문체 규칙]\n{system}\n\n{prompt}\n")
+

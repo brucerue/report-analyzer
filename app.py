@@ -1,6 +1,6 @@
 """사업보고서 분석기 — 사업·반기·분기보고서를 목차 부분별로 깊게 읽는 Streamlit 앱.
 
-비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL, PAPER_PRIVATE_READ_TOKEN — 문체 파일 읽기 전용, ANTHROPIC_API_KEY·CLAUDE_MODEL — 문체 틀 유료 선택).
+비밀값은 Streamlit Secrets에만: DART_API_KEY, GEMINI_API_KEY (선택: GEMINI_MODEL, GEMINI_FALLBACK_MODEL, PAPER_PRIVATE_READ_TOKEN — 문체 파일 읽기 전용).
 """
 import json
 import os
@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 02:10"
+LAST_UPDATED = "2026.11.24 02:40"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -37,9 +37,7 @@ DART_KEY = load_secret("DART_API_KEY")
 GEMINI_KEY = load_secret("GEMINI_API_KEY")
 GEMINI_MODEL = load_secret("GEMINI_MODEL") or "gemini-3.6-flash"
 GEMINI_FALLBACK = load_secret("GEMINI_FALLBACK_MODEL") or "gemini-3.5-flash-lite"
-STYLE_TOKEN = load_secret("PAPER_PRIVATE_READ_TOKEN")
-CLAUDE_KEY = load_secret("ANTHROPIC_API_KEY")  # 선택(유료): 문체 틀에서만
-CLAUDE_MODEL = load_secret("CLAUDE_MODEL")  # 문체 파일(paper-private) 읽기 전용
+STYLE_TOKEN = load_secret("PAPER_PRIVATE_READ_TOKEN")  # 문체 파일(paper-private) 읽기 전용
 
 
 @st.cache_resource
@@ -460,30 +458,12 @@ def marked(text):
 
 
 def render_frame(all_cards, picked, lead, rno):
-    """문체 틀: 문체 규칙(paper-private) + 예문 + 고른 요소의 숫자 -> Gemini 작성 -> 규칙 점검."""
+    """문체 틀: 문체 규칙(paper-private) + 예문 + 고른 요소의 숫자 -> Gemini 작성 -> 규칙 점검.
+    Gemini 대신 claude.ai 등에 직접 붙여 넣을 수 있게 같은 재료를 한 덩어리로도 보여 준다(API 비용 없음)."""
     import style as sty
     st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체)")
     ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요. "
-            "작성 → 규칙 점검 두 번 AI를 부르고, 숫자는 고른 요소의 값과 대조해요.")
-    engines = (["Gemini (무료)"] if GEMINI_KEY else []) + (["Claude (유료)"] if CLAUDE_KEY else [])
-    if not engines:
-        ui.note("Streamlit Secrets에 GEMINI_API_KEY(무료) 또는 ANTHROPIC_API_KEY(유료)를 넣으면 쓸 수 있어요.")
-        return
-    engine = st.radio("쓰는 AI", engines, horizontal=True, key="f_engine") if len(engines) > 1 else engines[0]
-    meter, cmodel, skip_check = [], None, False
-    if engine.startswith("Claude"):
-        import claude_ai
-        names = list(claude_ai.MODELS)
-        default = next((i for i, n in enumerate(names) if CLAUDE_MODEL and claude_ai.MODELS[n][0] == CLAUDE_MODEL), 0)
-        pick = st.radio("Claude 모델", names, index=default, horizontal=True, key="f_cmodel")
-        cmodel = claude_ai.MODELS[pick][0]
-        skip_check = st.checkbox("규칙 점검 건너뛰기 (AI를 한 번만 불러 비용 절반)", key="f_skip")
-    label = f"Claude · {pick}" if cmodel else engine
-
-    def ask(prompt, system):
-        if engine.startswith("Claude"):
-            return claude_ai.call_claude(CLAUDE_KEY, prompt, system, model=cmodel, meter=meter)
-        return an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
+            "'틀 만들기'는 Gemini(무료)로 작성 → 규칙 점검 두 번 부르고, 숫자는 고른 요소의 값과 대조해요.")
     try:
         style = sty.load(get_session(), STYLE_TOKEN)
     except sty.StyleError as e:
@@ -494,6 +474,15 @@ def render_frame(all_cards, picked, lead, rno):
     data = art.facts(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
     with st.expander("AI에 넘기는 숫자 자료 (분석 결과)"):
         st.json(data, expanded=False)
+    with st.expander("Claude에 붙여 넣을 재료 (복사해서 claude.ai 대화창에 그대로 붙여 넣기)"):
+        ui.note("문체 규칙·예문·숫자 자료·지시를 한 덩어리로 묶었어요. 오른쪽 위 단추로 복사하세요. API 비용 없이 구독 안에서 같은 틀을 받을 수 있어요.")
+        st.code(art.paste_bundle(style["rules"], sty.examples_for(style, kind), kind, data), language=None, wrap_lines=True)
+    if not GEMINI_KEY:
+        ui.note("'틀 만들기'(Gemini)를 쓰려면 Streamlit Secrets에 GEMINI_API_KEY를 넣어 주세요.")
+        return
+
+    def ask(prompt, system):
+        return an.call_gemini(get_session(), GEMINI_KEY, GEMINI_MODEL, prompt, system, GEMINI_FALLBACK)
     if st.button("틀 만들기", type="primary", key="f_go"):
         with st.spinner("쓰는 중... (작성 → 규칙 점검, 1분 안팎)"):
             src = art.pct0(json.dumps(data, ensure_ascii=False)) + "\n" + json.dumps(data, ensure_ascii=False)
@@ -503,24 +492,18 @@ def render_frame(all_cards, picked, lead, rno):
             except an.AiError as e:
                 first = None
                 st.error(str(e))
-            if first and skip_check:
-                st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, engine=label, skipped=True)
-            elif first:
+            if first:
                 try:
                     system2, prompt2 = art.check_prompt(style["rules"], first)
                     body, fixes = art.split_check(ask(prompt2, system2))
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src, engine=label)
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(body) or first, fixes=fixes, src=src)
                 except an.AiError as e:  # 점검에서 한도에 걸려도 첫 초안은 살린다
                     st.warning(f"규칙 점검은 못 했어요 — {e} 아래는 점검 전 첫 초안이에요.")
-                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True, engine=engine)
-            if meter and st.session_state.get("f_out", {}).get("rno") == rno:
-                tin, tout, won = claude_ai.cost_won(meter)
-                st.session_state["f_out"]["cost"] = (f"이번 실행 실제 사용량: 입력 {tin:,}토큰 · 출력 {tout:,}토큰 (생각한 분량 포함)"
-                                                     + (f" · 약 {won:,.0f}원 (1달러={claude_ai.WON_PER_DOLLAR:,}원 어림)" if won is not None else ""))
+                    st.session_state["f_out"] = dict(rno=rno, kind=kind, first=first, body=art.pct0(first), fixes=[], src=src, unchecked=True)
     out = st.session_state.get("f_out")
     if out and out["rno"] == rno:
         n, goal = art.body_chars(out["body"]), art.KINDS[out["kind"]][1]
-        ui.note(f"{out.get('engine', '')} · 본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
+        ui.note(f"본문 {n:,}자 / 목표 약 {goal:,}자" + (" — 목표에서 100자 넘게 벗어났어요." if abs(n - goal) > 100 else ""))
         bad = an.unverified_numbers(out["body"], out["src"])
         if bad:
             st.warning("숫자 자료에 없는 숫자가 있어요: " + ", ".join(bad) + ". 고치거나 빼 주세요.")
@@ -528,10 +511,6 @@ def render_frame(all_cards, picked, lead, rno):
             ui.note("틀의 숫자는 모두 숫자 자료에 있어요.")
         st.html(marked(out["body"]))
         st.code(out["body"], language=None, wrap_lines=True)
-        if out.get("cost"):
-            ui.note(out["cost"])
-        if out.get("skipped"):
-            ui.note("규칙 점검을 건너뛴 첫 초안이에요.")
         if out.get("unchecked"):
             ui.note("규칙 점검 전 초안이에요. 한도가 풀리면 '틀 만들기'를 다시 누르면 점검까지 해요.")
         with st.expander(f"규칙 점검에서 고친 곳 ({len(out['fixes'])})"):
