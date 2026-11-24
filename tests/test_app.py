@@ -125,6 +125,7 @@ an.call_gemini = fake_gemini
 at.run()
 assert not at.exception, at.exception
 at.radio(key="f_kind").set_value("B").run()
+at.radio(key="f_how").set_value("앱에서 바로 만들기 (Gemini 무료)").run()
 at.button(key="f_go").click().run()
 assert not at.exception, at.exception
 assert len(calls) == 2 and "가짜 문체 규칙" in calls[0][0] and "가짜 예문 B" in calls[0][1] and "9조원" in calls[0][1], "작성 호출: 규칙·예문·숫자 자료"
@@ -156,7 +157,7 @@ print("ok - 점검에서 한도에 걸려도 첫 초안은 보임")
 
 
 # ---- Claude에 붙여 넣을 재료 ----
-at.radio(key="f_how").set_value("Claude에 붙여 넣을 재료만 받기").run()
+at.radio(key="f_how").set_value("Claude에 붙여 넣을 재료 받기 (추천)").run()
 assert not at.exception, at.exception
 assert not any(b.key == "f_go" for b in at.button), "Claude 쪽을 고르면 '틀 만들기' 버튼은 숨김"
 codes = " ".join(c.value for c in at.code)

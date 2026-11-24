@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 03:50"
+LAST_UPDATED = "2026.11.24 04:00"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -495,7 +495,7 @@ def render_frame(all_cards, picked, lead, rno):
         return
     kind = st.radio("① 기사 유형", list(art.KINDS), format_func=lambda k: f"{art.KINDS[k][0]} (약 {art.KINDS[k][1]:,}자)",
                     horizontal=True, key="f_kind")
-    how = st.radio("② 만드는 방법", ["앱에서 바로 만들기 (Gemini 무료)", "Claude에 붙여 넣을 재료만 받기"], horizontal=True, key="f_how")
+    how = st.radio("② 만드는 방법", ["Claude에 붙여 넣을 재료 받기 (추천)", "앱에서 바로 만들기 (Gemini 무료)"], horizontal=True, key="f_how")
     data = art.facts(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
     if how.startswith("Claude"):
         ui.note("'재료 전체 복사'를 누르고 claude.ai 대화창에 그대로 붙여 넣으세요. 문체 규칙·예문·숫자 자료·지시가 다 들어 있어서 "
