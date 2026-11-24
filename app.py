@@ -18,8 +18,8 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 04:00"
-st.set_page_config(page_title="사업보고서 분석기", layout="wide")
+LAST_UPDATED = "2026.11.24 04:20"
+st.set_page_config(page_title="사업보고서 분석기", page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png"), layout="wide")
 ui.inject()
 
 
