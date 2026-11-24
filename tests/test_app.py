@@ -156,6 +156,9 @@ print("ok - 점검에서 한도에 걸려도 첫 초안은 보임")
 
 
 # ---- Claude에 붙여 넣을 재료 ----
+at.radio(key="f_how").set_value("Claude에 붙여 넣을 재료만 받기").run()
+assert not at.exception, at.exception
+assert not any(b.key == "f_go" for b in at.button), "Claude 쪽을 고르면 '틀 만들기' 버튼은 숨김"
 codes = " ".join(c.value for c in at.code)
 assert "[문체 규칙]" in codes and "가짜 문체 규칙" in codes and "[분석 결과]" in codes and "[고친 곳]" in codes, "붙여 넣을 재료 한 덩어리"
 print("ok - Claude에 붙여 넣을 재료 (규칙·예문·숫자 자료·지시)")

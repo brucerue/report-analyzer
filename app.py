@@ -18,7 +18,7 @@ import points as pt
 import report_parse as rp
 import ui
 
-LAST_UPDATED = "2026.11.24 02:40"
+LAST_UPDATED = "2026.11.24 03:00"
 st.set_page_config(page_title="사업보고서 분석기", layout="wide")
 ui.inject()
 
@@ -462,23 +462,26 @@ def render_frame(all_cards, picked, lead, rno):
     Gemini 대신 claude.ai 등에 직접 붙여 넣을 수 있게 같은 재료를 한 덩어리로도 보여 준다(API 비용 없음)."""
     import style as sty
     st.markdown("#### 문체 틀 만들기 (중앙일보 산업부 문체)")
-    ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요. "
-            "'틀 만들기'는 Gemini(무료)로 작성 → 규칙 점검 두 번 부르고, 숫자는 고른 요소의 값과 대조해요.")
+    ui.note("바로 출고할 기사가 아니라 기자가 채워 넣을 틀이에요. 날짜는 'OO일', 원인·전망은 【확인 필요】로 비워 둬요.")
     try:
         style = sty.load(get_session(), STYLE_TOKEN)
     except sty.StyleError as e:
         st.warning(f"문체 파일을 읽지 못했어요: {e}")
         return
-    kind = st.radio("기사 유형", list(art.KINDS), format_func=lambda k: f"{art.KINDS[k][0]} (약 {art.KINDS[k][1]:,}자)",
+    kind = st.radio("① 기사 유형", list(art.KINDS), format_func=lambda k: f"{art.KINDS[k][0]} (약 {art.KINDS[k][1]:,}자)",
                     horizontal=True, key="f_kind")
+    how = st.radio("② 만드는 방법", ["앱에서 바로 만들기 (Gemini 무료)", "Claude에 붙여 넣을 재료만 받기"], horizontal=True, key="f_how")
     data = art.facts(all_cards, picked, lead, corp["corp_name"], dc.strip_correction(row.get("report_nm")), str(row.get("rcept_dt", "")))
-    with st.expander("AI에 넘기는 숫자 자료 (분석 결과)"):
-        st.json(data, expanded=False)
-    with st.expander("Claude에 붙여 넣을 재료 (복사해서 claude.ai 대화창에 그대로 붙여 넣기)"):
-        ui.note("문체 규칙·예문·숫자 자료·지시를 한 덩어리로 묶었어요. 오른쪽 위 단추로 복사하세요. API 비용 없이 구독 안에서 같은 틀을 받을 수 있어요.")
+    if how.startswith("Claude"):
+        ui.note("아래 글을 오른쪽 위 단추로 복사해 claude.ai 대화창에 그대로 붙여 넣으세요. 문체 규칙·예문·숫자 자료·지시가 다 들어 있어서 "
+                "Claude가 틀을 쓰고 스스로 규칙 점검까지 해요. (이 앱은 AI를 부르지 않아요)")
         st.code(art.paste_bundle(style["rules"], sty.examples_for(style, kind), kind, data), language=None, wrap_lines=True)
+        return
+    ui.note("'틀 만들기'를 누르면 Gemini를 두 번(작성 → 규칙 점검) 불러요. 1분 안팎 걸리고, 결과 숫자를 고른 요소의 값과 대조해요.")
+    with st.expander("참고: AI에 넘기는 숫자 자료"):
+        st.json(data, expanded=False)
     if not GEMINI_KEY:
-        ui.note("'틀 만들기'(Gemini)를 쓰려면 Streamlit Secrets에 GEMINI_API_KEY를 넣어 주세요.")
+        ui.note("Streamlit Secrets에 GEMINI_API_KEY를 넣어야 쓸 수 있어요. 지금은 '② 만드는 방법'에서 Claude 쪽을 고르세요.")
         return
 
     def ask(prompt, system):
